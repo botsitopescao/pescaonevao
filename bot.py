@@ -344,19 +344,25 @@ async def lista_registrados(ctx):
     await asyncio.sleep(1)
 
 @bot.command()
-async def registrar_usuario(ctx, user: discord.User, fortnite_username: str, platform: str, country: str):
+async def registrar_usuario(ctx, *, args: str):
     if not is_owner_and_allowed(ctx):
         return
+    # Se espera el siguiente formato: Discord ID | nombre de discord | nombre de Fortnite | Plataforma | País
+    parts = args.split('|')
+    if len(parts) != 5:
+        await ctx.send("❌ Formato incorrecto. Utiliza: !registrar_usuario <Discord ID> | <nombre de discord> | <nombre de Fortnite> | <Plataforma> | <País>")
+        return
+    discord_id, discord_name, fortnite_username, platform, country = [p.strip() for p in parts]
     participant = {
-        "discord_name": user.display_name,
+        "discord_name": discord_name,
         "fortnite_username": fortnite_username,
         "platform": platform,
         "country": country,
         "puntuacion": 0,
         "etapa": current_stage
     }
-    upsert_participant(str(user.id), participant)
-    await ctx.send(f"✅ Usuario {user.display_name} registrado correctamente.")
+    upsert_participant(discord_id, participant)
+    await ctx.send(f"✅ Usuario {discord_name} registrado correctamente con Discord ID {discord_id}.")
     await asyncio.sleep(1)
 
 @bot.command()

@@ -48,7 +48,7 @@ def init_db():
                 etapa INTEGER DEFAULT 1
             )
         """)
-        # Tabla de chistes: se crea la tabla (si no existe) y se asegura que exista la columna "content"
+        # Tabla de chistes: se crea la tabla (si no existe) y se asegura que exista la columna "joke_text"
         cur.execute("""
             CREATE TABLE IF NOT EXISTS jokes (
                 id SERIAL PRIMARY KEY
@@ -56,7 +56,7 @@ def init_db():
         """)
         cur.execute("""
             ALTER TABLE jokes
-            ADD COLUMN IF NOT EXISTS content TEXT NOT NULL DEFAULT ''
+            ADD COLUMN IF NOT EXISTS joke_text TEXT NOT NULL DEFAULT ''
         """)
         # Tabla de trivias: se crea la tabla (si no existe) y se aseguran las columnas necesarias
         cur.execute("""
@@ -189,7 +189,7 @@ def normalize_string(s):
 ######################################
 def get_random_joke():
     with conn.cursor() as cur:
-        cur.execute("SELECT content FROM jokes ORDER BY RANDOM() LIMIT 1")
+        cur.execute("SELECT joke_text FROM jokes ORDER BY RANDOM() LIMIT 1")
         result = cur.fetchone()
         if result:
             return result[0]
@@ -199,7 +199,7 @@ def get_random_joke():
 def add_jokes_bulk(jokes_list):
     with conn.cursor() as cur:
         for joke in jokes_list:
-            cur.execute("INSERT INTO jokes (content) VALUES (%s)", (joke,))
+            cur.execute("INSERT INTO jokes (joke_text) VALUES (%s)", (joke,))
             asyncio.sleep(0.1)  # Delay para evitar múltiples solicitudes seguidas
 
 def delete_all_jokes():

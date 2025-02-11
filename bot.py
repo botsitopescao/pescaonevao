@@ -81,9 +81,14 @@ def init_db():
             ALTER TABLE trivias
             ADD COLUMN IF NOT EXISTS answer TEXT NOT NULL DEFAULT ''
         """)
+        # Se reemplaza la columna 'hint' por dos columnas: 'hint1' y 'hint2'
         cur.execute("""
             ALTER TABLE trivias
-            ADD COLUMN IF NOT EXISTS hint TEXT
+            ADD COLUMN IF NOT EXISTS hint1 TEXT
+        """)
+        cur.execute("""
+            ALTER TABLE trivias
+            ADD COLUMN IF NOT EXISTS hint2 TEXT
         """)
         
         # Tabla de memes
@@ -132,7 +137,7 @@ forwarding_end_time = None
 ######################################
 # VARIABLE GLOBAL PARA TRIVIA
 ######################################
-active_trivia = {}  # key: channel.id, value: {"question": ..., "answer": ..., "hint": ...}
+active_trivia = {}  # key: channel.id, value: {"question": ..., "answer": ..., "hint1": ..., "hint2": ...}
 
 # Variables globales para cache de chistes y trivias (para evitar repeticiones hasta agotar la lista)
 global_jokes_cache = []
@@ -243,7 +248,12 @@ def get_random_trivia():
     if global_trivias_cache:
         index = random.randrange(len(global_trivias_cache))
         trivia = global_trivias_cache.pop(index)
-        return {"question": trivia["question"], "answer": trivia["answer"], "hint": trivia.get("hint", "")}
+        return {
+            "question": trivia["question"],
+            "answer": trivia["answer"],
+            "hint1": trivia.get("hint1", ""),
+            "hint2": trivia.get("hint2", "")
+        }
     else:
         return None
 
@@ -252,8 +262,9 @@ def add_trivias_bulk(trivias_list):
         for trivia in trivias_list:
             question = trivia.get("question")
             answer = trivia.get("answer")
-            hint = trivia.get("hint", "")
-            cur.execute("INSERT INTO trivias (question, answer, hint) VALUES (%s, %s, %s)", (question, answer, hint))
+            hint1 = trivia.get("hint1", "")
+            hint2 = trivia.get("hint2", "")
+            cur.execute("INSERT INTO trivias (question, answer, hint1, hint2) VALUES (%s, %s, %s, %s)", (question, answer, hint1, hint2))
             asyncio.sleep(0.1)  # Delay para evitar múltiples solicitudes seguidas
     global global_trivias_cache
     global_trivias_cache = []
@@ -474,7 +485,7 @@ async def eliminar_todas_trivias(ctx):
 # Estos comandos funcionarán para cualquier usuario, sin restricciones, y se podrán activar sin el prefijo.
 
 @bot.command()
-@cooldown(1, 10, BucketType.user)  # Cooldown de 10 segundos por usuario
+@cooldown(1, 10, BucketType.user)
 async def trivia(ctx):
     if ctx.author.bot:
         return
@@ -485,7 +496,8 @@ async def trivia(ctx):
         active_trivia[ctx.channel.id] = {
             "question": trivia_item["question"],
             "answer": normalize_string(trivia_item["answer"]),
-            "hint": trivia_item.get("hint", ""),
+            "hint1": trivia_item.get("hint1", ""),
+            "hint2": trivia_item.get("hint2", ""),
             "attempts": {}
         }
         await ctx.send(f"**Trivia:** {trivia_item['question']}\n_Responde en el chat._")
@@ -493,7 +505,7 @@ async def trivia(ctx):
         await ctx.send("No tengo más trivias disponibles en este momento.")
 
 @bot.command()
-@cooldown(1, 10, BucketType.user)  # Cooldown de 10 segundos por usuario
+@cooldown(1, 10, BucketType.user)
 async def chiste(ctx):
     if ctx.author.bot:
         return
@@ -501,7 +513,7 @@ async def chiste(ctx):
     await ctx.send(joke)
 
 @bot.command()
-@cooldown(1, 10, BucketType.user)  # Cooldown de 10 segundos por usuario
+@cooldown(1, 10, BucketType.user)
 async def ranking(ctx):
     if ctx.author.bot:
         return
@@ -514,7 +526,7 @@ async def ranking(ctx):
         await ctx.send("❌ No estás registrado en el torneo.")
 
 @bot.command()
-@cooldown(1, 10, BucketType.user)  # Cooldown de 10 segundos por usuario
+@cooldown(1, 10, BucketType.user)
 async def topmejores(ctx):
     if ctx.author.bot:
         return
@@ -593,12 +605,16 @@ async def on_message(message):
             await message.channel.send(f"🎉 ¡Correcto, {message.author.mention}! Has acertado la trivia.")
             await asyncio.sleep(0.5)
             del active_trivia[message.channel.id]
-            # Puedes agregar lógica para otorgar puntos aquí si lo deseas
         else:
             trivia_data["attempts"][message.author.id] = user_attempts + 1
             attempts_left = max_attempts_per_user - trivia_data["attempts"][message.author.id]
+            hint_message = ""
+            if attempts_left == 2:
+                hint_message = f" Pista: {trivia_data.get('hint1', '')}"
+            elif attempts_left == 1:
+                hint_message = f" Pista: {trivia_data.get('hint2', '')}"
             if attempts_left > 0:
-                await message.channel.send(f"❌ Respuesta incorrecta, {message.author.mention}. Te quedan {attempts_left} intentos.")
+                await message.channel.send(f"❌ Respuesta incorrecta, {message.author.mention}. Te quedan {attempts_left} intentos.{hint_message}")
                 await asyncio.sleep(0.5)
             else:
                 await message.channel.send(f"❌ Has agotado tus intentos, {message.author.mention}.")

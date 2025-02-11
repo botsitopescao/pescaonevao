@@ -33,18 +33,6 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 if not DATABASE_URL:
     raise Exception("DATABASE_URL environment variable not set")
 
-# --- Corrección del DATABASE_URL ---
-# Parsear la URL y corregir el hostname si no contiene un dominio
-parsed_url = urllib.parse.urlparse(DATABASE_URL)
-if parsed_url.hostname and '.' not in parsed_url.hostname:
-    # Se asume que el dominio por defecto es ".db.render.com"
-    new_hostname = parsed_url.hostname + ".db.render.com"
-    netloc = new_hostname
-    if parsed_url.port:
-        netloc += f":{parsed_url.port}"
-    parsed_url = parsed_url._replace(netloc=netloc)
-    DATABASE_URL = urllib.parse.urlunparse(parsed_url)
-
 # Forzar el uso de SSL añadiendo sslmode=require si no está presente
 parsed_url = urllib.parse.urlparse(DATABASE_URL)
 query_params = dict(urllib.parse.parse_qsl(parsed_url.query))
@@ -53,7 +41,6 @@ if "sslmode" not in query_params:
     new_query = urllib.parse.urlencode(query_params)
     parsed_url = parsed_url._replace(query=new_query)
     DATABASE_URL = urllib.parse.urlunparse(parsed_url)
-# --- Fin de la corrección ---
 
 conn = psycopg2.connect(DATABASE_URL)
 conn.autocommit = True

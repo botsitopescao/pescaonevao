@@ -122,8 +122,7 @@ def init_db():
         """)
         
         # Tabla de eventos del calendario, en zona horaria de Perú.
-        # Nota: En tu base de datos existente existe una columna "event_time" que es obligatoria;
-        # por lo tanto, se la incluirá en la inserción y se asignará el mismo valor que event_datetime.
+        # Nota: Se incluye la columna "event_time" obligatoria, asignándole el mismo valor que event_datetime.
         cur.execute("""
             CREATE TABLE IF NOT EXISTS calendar_events (
                 id SERIAL PRIMARY KEY,
@@ -135,7 +134,6 @@ def init_db():
                 notified_2h BOOLEAN DEFAULT FALSE
             )
         """)
-        # Aseguramos que todas las columnas existan
         cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS event_time TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()")
         cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS event_datetime TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()")
         cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS name TEXT NOT NULL DEFAULT ''")
@@ -441,24 +439,29 @@ async def borrar_usuario(ctx, user_id: str):
 
 # Comandos de eventos (SOLO OWNER_ID)
 @bot.command()
-async def agregar_evento(ctx, date: str, time: str, *, event_name: str):
+async def agregar_evento(ctx, *, args: str):
     if not is_owner_and_allowed(ctx):
         return
-    dt_str = f"{date} {time}"
+    # Espera el formato: "dd/mm/aaaa | hh:mm | Nombre del evento"
+    parts = args.split("|")
+    if len(parts) != 3:
+        await ctx.send("❌ Formato incorrecto. Utiliza: !agregar_evento dd/mm/aaaa | hh:mm | Nombre del evento")
+        return
+    date_str = parts[0].strip()
+    time_str = parts[1].strip()
+    event_name = parts[2].strip()
+    dt_str = f"{date_str} {time_str}"
     try:
-        # Convertir la fecha y hora en formato dd/mm/aaaa hh:mm a la zona horaria de Perú
         event_dt = datetime.datetime.strptime(dt_str, "%d/%m/%Y %H:%M")
         event_dt = event_dt.replace(tzinfo=ZoneInfo("America/Lima"))
     except Exception as e:
-        await ctx.send("❌ Formato de fecha u hora incorrecto. Usa dd/mm/aaaa hh:mm")
+        await ctx.send("❌ Formato de fecha u hora incorrecto. Utiliza: dd/mm/aaaa | hh:mm")
         return
     target_stage = current_stage
-    # Insertar tanto en event_time como en event_datetime usando el mismo valor
     with conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO calendar_events (event_time, event_datetime, name, target_stage, notified_10h, notified_2h) VALUES (%s, %s, %s, %s, FALSE, FALSE)",
-            (event_dt, event_dt, event_name, target_stage)
-        )
+        # Insertar en ambas columnas event_time y event_datetime con el mismo valor.
+        cur.execute("INSERT INTO calendar_events (event_time, event_datetime, name, target_stage, notified_10h, notified_2h) VALUES (%s, %s, %s, %s, FALSE, FALSE)", 
+                    (event_dt, event_dt, event_name, target_stage))
     await ctx.send(f"✅ Evento '{event_name}' agregado para el {dt_str} (Etapa {target_stage}).")
 
 @bot.command()
@@ -589,7 +592,6 @@ async def eliminar_todas_trivias(ctx):
 async def trivia(ctx):
     if ctx.author.bot:
         return
-    # Asignar la trivia al canal actual
     trivia_item = get_random_trivia()
     if trivia_item:
         active_trivia[ctx.channel.id] = {
@@ -647,14 +649,31 @@ async def topmejores(ctx):
         await ctx.send("No hay participantes en el torneo.")
 
 ######################################
-# EVENTO ON_MESSAGE (DM FORWARDING Y TRIVIA RESPUESTAS)
+# EVENTO ON_MESSAGE NO PREFIX (sólo para 'trivia' y 'chiste')
+######################################
+@bot.listen('on_message')
+async def on_message_no_prefix(message):
+    if message.author.bot:
+        return
+    content = message.content.lower().strip()
+    ctx = await bot.get_context(message)
+    if ctx.valid:
+        return
+    if content == 'trivia':
+        await trivia(ctx)
+    elif content == 'chiste':
+        await chiste(ctx)
+    else:
+        await bot.process_commands(message)
+
+######################################
+# EVENTO ON_MESSAGE (DM FORWARDING Y RESPUESTAS DE TRIVIA)
 ######################################
 @bot.event
 async def on_message(message):
     if message.author.bot:
         return
 
-    # Procesar comandos
     await bot.process_commands(message)
 
     # Si el mensaje es un DM y el usuario está en dm_forwarding, reenvía al canal SPECIAL_HELP_CHANNEL.
@@ -676,7 +695,7 @@ async def on_message(message):
                         print(f"Error forwarding DM from {message.author.id}: {e}")
                     await asyncio.sleep(1)
 
-    # Procesamiento de respuestas de trivia (solo en canales, no en DM)
+    # Procesamiento de respuestas de trivia (solo en canales)
     if message.guild is not None and message.channel.id in active_trivia:
         trivia_data = active_trivia[message.channel.id]
         user_attempts = trivia_data["attempts"].get(message.author.id, 0)

@@ -72,7 +72,7 @@ def init_db():
             ADD COLUMN IF NOT EXISTS joke_text TEXT NOT NULL DEFAULT ''
         """)
         
-        # Tabla de trivias con dos pistas
+        # Tabla de trivias (dos pistas)
         cur.execute("""
             CREATE TABLE IF NOT EXISTS trivias (
                 id SERIAL PRIMARY KEY
@@ -103,7 +103,7 @@ def init_db():
             )
         """)
         
-        # Tabla de eventos del calendario
+        # Tabla de eventos del calendario, en zona horaria de Perú
         cur.execute("""
             CREATE TABLE IF NOT EXISTS calendar_events (
                 id SERIAL PRIMARY KEY,
@@ -119,8 +119,8 @@ init_db()
 ######################################
 # VARIABLES GLOBALES ADICIONALES
 ######################################
-# Para DM forwarding según etapa (campeón, etc.)
-dm_forwarding = {}  # Mapea user_id (str) a None (indefinido) o a un datetime (fecha de expiración)
+# Para DM forwarding según condiciones especiales
+dm_forwarding = {}  # Diccionario: user_id (str) -> None (indefinido) o datetime (fecha de expiración)
 
 ######################################
 # CONFIGURACIÓN INICIAL DEL TORNEO
@@ -146,7 +146,7 @@ forwarding_end_time = None
 ######################################
 # VARIABLE GLOBAL PARA TRIVIA
 ######################################
-active_trivia = {}  # key: channel.id, value: {"question": ..., "answer": ..., "hint1": ..., "hint2": ..., "attempts": {...}}
+active_trivia = {}  # Diccionario: channel.id -> {"question":..., "answer":..., "hint1":..., "hint2":..., "attempts": {...}}
 
 # Caches para chistes y trivias
 global_jokes_cache = []
@@ -411,7 +411,7 @@ async def borrar_usuario(ctx, user_id: str):
     await ctx.send(f"✅ Se ha eliminado el usuario con ID {user_id} del registro.")
     await asyncio.sleep(1)
 
-# Comandos de eventos
+# Comandos de eventos (SOLO OWNER_ID)
 @bot.command()
 async def agregar_evento(ctx, date: str, time: str, *, event_name: str):
     if not is_owner_and_allowed(ctx):
@@ -454,6 +454,102 @@ async def borrar_evento(ctx, event_id: int):
     with conn.cursor() as cur:
         cur.execute("DELETE FROM calendar_events WHERE id = %s", (event_id,))
     await ctx.send(f"✅ Evento con ID {event_id} borrado del calendario.")
+
+@bot.command()
+async def avanzar_etapa(ctx, etapa: int):
+    if not is_owner_and_allowed(ctx):
+        return
+    global current_stage
+    old_stage = current_stage
+    current_stage = etapa
+    data = get_all_participants()
+    limite_jugadores = STAGES.get(etapa, None)
+    if limite_jugadores is not None:
+        sorted_players = sorted(data["participants"].items(), key=lambda item: int(item[1].get("puntuacion", 0)), reverse=True)
+        advanced = sorted_players[:limite_jugadores]
+        for user_id, participant in advanced:
+            participant["etapa"] = etapa
+            upsert_participant(user_id, participant)
+            await asyncio.sleep(0.1)
+        await ctx.send(f"✅ Etapa actualizada a {etapa}. {limite_jugadores} jugadores han avanzado a esta etapa.")
+        # Enviar notificaciones solo si se asciende a una etapa superior
+        if etapa > old_stage:
+            for user_id, participant in advanced:
+                user = bot.get_user(int(user_id))
+                if user is not None:
+                    try:
+                        # Mensajes especiales para etapas 6, 7 y 8
+                        if etapa == 6:
+                            msg = "🏆 ¡Felicidades! Eres el campeón del torneo y acabas de ganar 2800 paVos que se te entregarán en forma de regalos de la tienda de objetos de Fortnite, así que envíame los nombres de los objetos que quieres que te regale que sumen 2800 paVos."
+                            dm_forwarding[user_id] = None  # reenvío indefinido
+                        elif etapa == 7:
+                            msg = "🎁 Todavía te quedan objetos por escoger para completar tu premio de 2800 paVos."
+                            dm_forwarding[user_id] = None  # reenvío indefinido
+                        elif etapa == 8:
+                            msg = "🥇 Tus objetos han sido entregados campeón, muchas gracias por participar, has sido el mejor pescadito del torneo, nos vemos pronto."
+                            dm_forwarding[user_id] = datetime.datetime.utcnow() + datetime.timedelta(days=2)
+                        else:
+                            msg = f"🎉 ¡Felicidades! Has avanzado a la etapa {etapa}."
+                        await user.send(msg)
+                    except Exception as e:
+                        print(f"Error enviando DM a {user_id}: {e}")
+                    await asyncio.sleep(1)
+            for user_id, participant in data["participants"].items():
+                if participant.get("etapa", old_stage) == old_stage and user_id not in [uid for uid, _ in advanced]:
+                    user = bot.get_user(int(user_id))
+                    if user is not None:
+                        try:
+                            await user.send(f"😢 Lamentamos informarte que no has avanzado a la etapa {etapa} y has sido eliminado del torneo.")
+                        except Exception as e:
+                            print(f"Error enviando DM a {user_id}: {e}")
+                    await asyncio.sleep(1)
+        await asyncio.sleep(1)
+    else:
+        await ctx.send(f"❌ La etapa {etapa} no está definida en STAGES.")
+        await asyncio.sleep(1)
+
+@bot.command()
+async def agregar_chistes_masivos(ctx, *, chistes_texto: str):
+    if not is_owner_and_allowed(ctx):
+        return
+    chistes_lista = [chiste.strip() for chiste in chistes_texto.strip().split('\n') if chiste.strip()]
+    if chistes_lista:
+        add_jokes_bulk(chistes_lista)
+        await ctx.send(f"✅ Se han agregado {len(chistes_lista)} chistes a la base de datos.")
+    else:
+        await ctx.send("❌ No se encontraron chistes para agregar.")
+    await asyncio.sleep(1)
+
+@bot.command()
+async def agregar_trivias_masivas(ctx, *, trivias_json: str):
+    if not is_owner_and_allowed(ctx):
+        return
+    try:
+        trivias_lista = json.loads(trivias_json)
+        if isinstance(trivias_lista, list):
+            add_trivias_bulk(trivias_lista)
+            await ctx.send(f"✅ Se han agregado {len(trivias_lista)} trivias a la base de datos.")
+        else:
+            await ctx.send("❌ El formato de las trivias es incorrecto. Debe ser una lista de objetos.")
+    except json.JSONDecodeError:
+        await ctx.send("❌ Error al procesar el JSON. Asegúrate de que el formato sea correcto.")
+    await asyncio.sleep(1)
+
+@bot.command()
+async def eliminar_todos_chistes(ctx):
+    if not is_owner_and_allowed(ctx):
+        return
+    delete_all_jokes()
+    await ctx.send("✅ Se han eliminado todos los chistes de la base de datos.")
+    await asyncio.sleep(1)
+
+@bot.command()
+async def eliminar_todas_trivias(ctx):
+    if not is_owner_and_allowed(ctx):
+        return
+    delete_all_trivias()
+    await ctx.send("✅ Se han eliminado todas las trivias de la base de datos.")
+    await asyncio.sleep(1)
 
 ######################################
 # COMANDOS COMUNES (DISPONIBLES PARA TODOS)
@@ -548,7 +644,7 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    # DM forwarding: si el mensaje se envía por DM y el autor está en dm_forwarding, reenviar al canal SPECIAL_HELP_CHANNEL.
+    # DM forwarding: Si el mensaje es un DM y el usuario está en dm_forwarding, reenvía al canal SPECIAL_HELP_CHANNEL.
     if message.guild is None:
         if message.author.id in dm_forwarding:
             end_time = dm_forwarding[message.author.id]
@@ -618,7 +714,6 @@ async def on_ready():
 
 async def event_notifier():
     await bot.wait_until_ready()
-    # Usar la zona horaria de Perú para el calendario
     tz_peru = ZoneInfo("America/Lima")
     while not bot.is_closed():
         now = datetime.datetime.now(tz_peru)
@@ -636,7 +731,6 @@ async def event_notifier():
                 for user_row in users:
                     user = bot.get_user(int(user_row["user_id"]))
                     if user is not None:
-                        # Convertir la hora del evento a la zona horaria del usuario
                         tz_user = ZoneInfo(country_timezones.get(user_row["country"], "UTC"))
                         local_dt = event_dt.astimezone(tz_user)
                         msg = f"⏰ Faltan 10 horas para '{ev['name']}', que se realizará el {local_dt.strftime('%d/%m/%Y %H:%M')} hora {user_row['country']}."

@@ -122,7 +122,7 @@ def init_db():
         """)
         
         # Tabla de eventos del calendario, en zona horaria de Perú.
-        # Nota: Se incluye la columna "event_time" obligatoria, asignándole el mismo valor que event_datetime.
+        # Nota: Se incluye la columna "event_time" obligatoria (se usará para almacenar la fecha y hora)
         cur.execute("""
             CREATE TABLE IF NOT EXISTS calendar_events (
                 id SERIAL PRIMARY KEY,
@@ -458,10 +458,12 @@ async def agregar_evento(ctx, *, args: str):
         await ctx.send("❌ Formato de fecha u hora incorrecto. Utiliza: dd/mm/aaaa | hh:mm")
         return
     target_stage = current_stage
+    # Insertar en ambas columnas event_time y event_datetime con el mismo valor.
     with conn.cursor() as cur:
-        # Insertar en ambas columnas event_time y event_datetime con el mismo valor.
-        cur.execute("INSERT INTO calendar_events (event_time, event_datetime, name, target_stage, notified_10h, notified_2h) VALUES (%s, %s, %s, %s, FALSE, FALSE)", 
-                    (event_dt, event_dt, event_name, target_stage))
+        cur.execute(
+            "INSERT INTO calendar_events (event_time, event_datetime, name, target_stage, notified_10h, notified_2h) VALUES (%s, %s, %s, %s, FALSE, FALSE)",
+            (event_dt, event_dt, event_name, target_stage)
+        )
     await ctx.send(f"✅ Evento '{event_name}' agregado para el {dt_str} (Etapa {target_stage}).")
 
 @bot.command()
@@ -585,94 +587,30 @@ async def eliminar_todas_trivias(ctx):
     await asyncio.sleep(1)
 
 ######################################
-# COMANDOS COMUNES (DISPONIBLES PARA TODOS)
-######################################
-@bot.command()
-@cooldown(1, 10, BucketType.user)
-async def trivia(ctx):
-    if ctx.author.bot:
-        return
-    trivia_item = get_random_trivia()
-    if trivia_item:
-        active_trivia[ctx.channel.id] = {
-            "question": trivia_item["question"],
-            "answer": normalize_string(trivia_item["answer"]),
-            "hint1": trivia_item.get("hint1", ""),
-            "hint2": trivia_item.get("hint2", ""),
-            "attempts": {}
-        }
-        await ctx.send(f"**Trivia:** {trivia_item['question']}\n_Responde en el chat._")
-    else:
-        await ctx.send("No tengo más trivias disponibles en este momento.")
-
-@bot.command()
-@cooldown(1, 10, BucketType.user)
-async def chiste(ctx):
-    if ctx.author.bot:
-        return
-    joke = get_random_joke()
-    await ctx.send(joke)
-
-@bot.command()
-@cooldown(1, 10, BucketType.user)
-async def ranking(ctx):
-    if ctx.author.bot:
-        return
-    user_id = str(ctx.author.id)
-    participant = get_participant(user_id)
-    if participant:
-        puntos = participant.get("puntuacion", 0)
-        await ctx.send(f"🌟 {ctx.author.display_name}, tienes **{puntos} puntos** en el torneo.")
-    else:
-        await ctx.send("❌ No estás registrado en el torneo.")
-
-@bot.command()
-@cooldown(1, 10, BucketType.user)
-async def topmejores(ctx):
-    if ctx.author.bot:
-        return
-    with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-        cur.execute("""
-            SELECT fortnite_username, puntuacion
-            FROM registrations
-            ORDER BY puntuacion DESC
-            LIMIT 10
-        """)
-        top_players = cur.fetchall()
-    if top_players:
-        lines = ["🏆 **Top 10 Mejores del Torneo:**"]
-        for idx, player in enumerate(top_players, start=1):
-            lines.append(f"{idx}. {player['fortnite_username']} - {player['puntuacion']} puntos")
-        message = "\n".join(lines)
-        await ctx.send(message)
-    else:
-        await ctx.send("No hay participantes en el torneo.")
-
-######################################
-# EVENTO ON_MESSAGE NO PREFIX (sólo para 'trivia' y 'chiste')
-######################################
-@bot.listen('on_message')
-async def on_message_no_prefix(message):
-    if message.author.bot:
-        return
-    content = message.content.lower().strip()
-    ctx = await bot.get_context(message)
-    if ctx.valid:
-        return
-    if content == 'trivia':
-        await trivia(ctx)
-    elif content == 'chiste':
-        await chiste(ctx)
-    else:
-        await bot.process_commands(message)
-
-######################################
-# EVENTO ON_MESSAGE (DM FORWARDING Y RESPUESTAS DE TRIVIA)
+# EVENTO ON_MESSAGE ÚNICO (Procesa comandos sin prefijo y respuestas de trivia)
 ######################################
 @bot.event
 async def on_message(message):
     if message.author.bot:
         return
+
+    # Obtener contexto para ver si el mensaje es un comando válido con prefijo
+    ctx = await bot.get_context(message)
+    if not ctx.valid:
+        content = message.content.lower().strip()
+        # Permitir el uso de comandos sin prefijo para: trivia, chiste, ranking, topmejores
+        if content == "trivia":
+            await trivia(ctx)
+            return
+        elif content == "chiste":
+            await chiste(ctx)
+            return
+        elif content == "ranking":
+            await ranking(ctx)
+            return
+        elif content == "topmejores":
+            await topmejores(ctx)
+            return
 
     await bot.process_commands(message)
 
@@ -695,7 +633,7 @@ async def on_message(message):
                         print(f"Error forwarding DM from {message.author.id}: {e}")
                     await asyncio.sleep(1)
 
-    # Procesamiento de respuestas de trivia (solo en canales)
+    # Procesamiento de respuestas de trivia (solo en canales, no DM)
     if message.guild is not None and message.channel.id in active_trivia:
         trivia_data = active_trivia[message.channel.id]
         user_attempts = trivia_data["attempts"].get(message.author.id, 0)
@@ -713,11 +651,12 @@ async def on_message(message):
         else:
             trivia_data["attempts"][message.author.id] = user_attempts + 1
             attempts_left = max_attempts_per_user - trivia_data["attempts"][message.author.id]
-            hint_message = ""
             if attempts_left == 2:
                 hint_message = f" Pista: {trivia_data.get('hint1', '')}"
             elif attempts_left == 1:
                 hint_message = f" Pista: {trivia_data.get('hint2', '')}"
+            else:
+                hint_message = ""
             if attempts_left > 0:
                 await message.channel.send(f"❌ Respuesta incorrecta, {message.author.mention}. Te quedan {attempts_left} intentos.{hint_message}")
                 await asyncio.sleep(0.5)

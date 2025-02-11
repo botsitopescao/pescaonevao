@@ -1,0 +1,4 @@
+discord.py
+Flask
+psycopg2-binary
+dateparser==1.1.8

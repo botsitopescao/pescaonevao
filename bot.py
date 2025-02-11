@@ -349,7 +349,7 @@ async def agregar_puntos_todos(ctx, puntos: int):
     for user_id, participant in data["participants"].items():
         update_score(user_id, puntos)
         count += 1
-        await asyncio.sleep(1)  # Delay para evitar exceder límites de solicitudes
+        await asyncio.sleep(1)
     await ctx.send(f"✅ Se han agregado {puntos} puntos a {count} usuarios.")
     await asyncio.sleep(1)
 
@@ -363,7 +363,7 @@ async def restar_puntos_todos(ctx, puntos: int, etapa: int = None):
         if etapa is None or participant["etapa"] == etapa:
             update_score(user_id, -puntos)
             count += 1
-            await asyncio.sleep(1)  # Delay para evitar exceder límites de solicitudes
+            await asyncio.sleep(1)
     await ctx.send(f"✅ Se han restado {puntos} puntos a {count} usuarios{' de la etapa ' + str(etapa) if etapa else ''}.")
     await asyncio.sleep(1)
 
@@ -384,7 +384,6 @@ async def lista_registrados(ctx):
 async def registrar_usuario(ctx, *, args: str):
     if not is_owner_and_allowed(ctx):
         return
-    # Se espera el siguiente formato: Discord ID | nombre de discord | nombre de Fortnite | Plataforma | País
     parts = args.split('|')
     if len(parts) != 5:
         await ctx.send("❌ Formato incorrecto. Utiliza: !registrar_usuario <Discord ID> | <nombre de discord> | <nombre de Fortnite> | <Plataforma> | <País>")
@@ -420,11 +419,8 @@ async def avanzar_etapa(ctx, etapa: int):
     data = get_all_participants()
     limite_jugadores = STAGES.get(etapa, None)
     if limite_jugadores is not None:
-        # Ordenar participantes por puntuación
         sorted_players = sorted(data["participants"].items(), key=lambda item: int(item[1].get("puntuacion", 0)), reverse=True)
-        # Seleccionar los mejores según el límite de jugadores
         seleccionados = sorted_players[:limite_jugadores]
-        # Actualizar la etapa de los seleccionados
         for user_id, participant in seleccionados:
             participant["etapa"] = etapa
             upsert_participant(user_id, participant)
@@ -440,7 +436,7 @@ async def agregar_chistes_masivos(ctx, *, chistes_texto: str):
     if not is_owner_and_allowed(ctx):
         return
     chistes_lista = [chiste.strip() for chiste in chistes_texto.strip().split('\n') if chiste.strip()]
-    if len(chistes_lista) > 0:
+    if chistes_lista:
         add_jokes_bulk(chistes_lista)
         await ctx.send(f"✅ Se han agregado {len(chistes_lista)} chistes a la base de datos.")
     else:
@@ -478,12 +474,9 @@ async def eliminar_todas_trivias(ctx):
     await ctx.send("✅ Se han eliminado todas las trivias de la base de datos.")
     await asyncio.sleep(1)
 
-# Otros comandos Pro...
 ######################################
 # COMANDOS COMUNES (DISPONIBLES PARA TODOS)
 ######################################
-# Estos comandos funcionarán para cualquier usuario, sin restricciones, y se podrán activar sin el prefijo.
-
 @bot.command()
 @cooldown(1, 10, BucketType.user)
 async def trivia(ctx):
@@ -547,7 +540,6 @@ async def topmejores(ctx):
     else:
         await ctx.send("No hay participantes en el torneo.")
 
-# Habilitar comandos sin prefijo '!'
 @bot.listen('on_message')
 async def on_message_no_prefix(message):
     if message.author.bot:
@@ -555,7 +547,7 @@ async def on_message_no_prefix(message):
     content = message.content.lower().strip()
     ctx = await bot.get_context(message)
     if ctx.valid:
-        return  # El mensaje ya es un comando válido
+        return
     if content == 'trivia':
         await trivia(ctx)
     elif content == 'chiste':
@@ -573,7 +565,7 @@ async def on_message_no_prefix(message):
 @bot.event
 async def on_message(message):
     if message.author.bot:
-        return  # Previene bucles infinitos
+        return
     global forwarding_enabled
     if message.guild is None and champion_id is not None and message.author.id == champion_id and forwarding_enabled:
         if forwarding_end_time is not None and datetime.datetime.utcnow() > forwarding_end_time:
@@ -586,18 +578,17 @@ async def on_message(message):
                     await asyncio.sleep(1)
             except Exception as e:
                 print(f"Error forwarding message: {e}")
-    # El resto de la lógica se maneja en on_message_no_prefix
     await bot.process_commands(message)
     
-    # Verificar respuestas de trivia
     if message.channel.id in active_trivia:
         trivia_data = active_trivia[message.channel.id]
         user_attempts = trivia_data["attempts"].get(message.author.id, 0)
-        max_attempts_per_user = 3  # Número máximo de intentos por usuario
+        max_attempts_per_user = 3
 
         if user_attempts >= max_attempts_per_user:
-            await message.channel.send(f"🚫 {message.author.mention}, has alcanzado el número máximo de intentos para esta trivia.")
-            await asyncio.sleep(0.5)
+            if user_attempts == max_attempts_per_user:
+                await message.channel.send(f"🚫 {message.author.mention}, has alcanzado el número máximo de intentos para esta trivia.")
+                trivia_data["attempts"][message.author.id] = max_attempts_per_user + 1
             return
 
         normalized_answer = normalize_string(message.content)

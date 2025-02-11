@@ -13,6 +13,7 @@ import asyncio
 import datetime
 from flask import Flask, request, jsonify
 from zoneinfo import ZoneInfo
+import urllib.parse  # para parsear la URL de la base de datos
 
 ######################################
 # CONFIGURACIÓN: IDs y Servidor
@@ -28,7 +29,32 @@ API_SECRET = os.environ.get("API_SECRET")  # Para la API privada (opcional)
 ######################################
 # CONEXIÓN A LA BASE DE DATOS POSTGRESQL
 ######################################
-DATABASE_URL = os.environ.get("DATABASE_URL")  # Usualmente la Internal Database URL de Render
+DATABASE_URL = os.environ.get("DATABASE_URL")
+if not DATABASE_URL:
+    raise Exception("DATABASE_URL environment variable not set")
+
+# --- Corrección del DATABASE_URL ---
+# Parsear la URL y corregir el hostname si no contiene un dominio
+parsed_url = urllib.parse.urlparse(DATABASE_URL)
+if parsed_url.hostname and '.' not in parsed_url.hostname:
+    # Se asume que el dominio por defecto es ".db.render.com"
+    new_hostname = parsed_url.hostname + ".db.render.com"
+    netloc = new_hostname
+    if parsed_url.port:
+        netloc += f":{parsed_url.port}"
+    parsed_url = parsed_url._replace(netloc=netloc)
+    DATABASE_URL = urllib.parse.urlunparse(parsed_url)
+
+# Forzar el uso de SSL añadiendo sslmode=require si no está presente
+parsed_url = urllib.parse.urlparse(DATABASE_URL)
+query_params = dict(urllib.parse.parse_qsl(parsed_url.query))
+if "sslmode" not in query_params:
+    query_params["sslmode"] = "require"
+    new_query = urllib.parse.urlencode(query_params)
+    parsed_url = parsed_url._replace(query=new_query)
+    DATABASE_URL = urllib.parse.urlunparse(parsed_url)
+# --- Fin de la corrección ---
+
 conn = psycopg2.connect(DATABASE_URL)
 conn.autocommit = True
 

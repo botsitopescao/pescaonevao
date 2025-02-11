@@ -121,20 +121,24 @@ def init_db():
             )
         """)
         
-        # Tabla de eventos del calendario, en zona horaria de Perú
+        # Tabla de eventos del calendario, en zona horaria de Perú.
+        # Nota: En tu base de datos existente existe una columna "event_time" que es obligatoria;
+        # por lo tanto, se la incluirá en la inserción y se asignará el mismo valor que event_datetime.
         cur.execute("""
             CREATE TABLE IF NOT EXISTS calendar_events (
                 id SERIAL PRIMARY KEY,
-                name TEXT NOT NULL,
+                event_time TIMESTAMP WITH TIME ZONE NOT NULL,
                 event_datetime TIMESTAMP WITH TIME ZONE NOT NULL,
+                name TEXT NOT NULL,
                 target_stage INTEGER NOT NULL,
                 notified_10h BOOLEAN DEFAULT FALSE,
                 notified_2h BOOLEAN DEFAULT FALSE
             )
         """)
-        # Forzar la existencia de las columnas en caso de que la tabla ya exista con otro esquema
+        # Aseguramos que todas las columnas existan
+        cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS event_time TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()")
+        cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS event_datetime TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()")
         cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS name TEXT NOT NULL DEFAULT ''")
-        cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS event_datetime TIMESTAMP WITH TIME ZONE NOT NULL")
         cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS target_stage INTEGER NOT NULL DEFAULT 0")
         cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS notified_10h BOOLEAN DEFAULT FALSE")
         cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS notified_2h BOOLEAN DEFAULT FALSE")
@@ -449,8 +453,12 @@ async def agregar_evento(ctx, date: str, time: str, *, event_name: str):
         await ctx.send("❌ Formato de fecha u hora incorrecto. Usa dd/mm/aaaa hh:mm")
         return
     target_stage = current_stage
+    # Insertar tanto en event_time como en event_datetime usando el mismo valor
     with conn.cursor() as cur:
-        cur.execute("INSERT INTO calendar_events (name, event_datetime, target_stage, notified_10h, notified_2h) VALUES (%s, %s, %s, FALSE, FALSE)", (event_name, event_dt, target_stage))
+        cur.execute(
+            "INSERT INTO calendar_events (event_time, event_datetime, name, target_stage, notified_10h, notified_2h) VALUES (%s, %s, %s, %s, FALSE, FALSE)",
+            (event_dt, event_dt, event_name, target_stage)
+        )
     await ctx.send(f"✅ Evento '{event_name}' agregado para el {dt_str} (Etapa {target_stage}).")
 
 @bot.command()
@@ -581,8 +589,7 @@ async def eliminar_todas_trivias(ctx):
 async def trivia(ctx):
     if ctx.author.bot:
         return
-    if ctx.channel.id in active_trivia:
-        del active_trivia[ctx.channel.id]
+    # Asignar la trivia al canal actual
     trivia_item = get_random_trivia()
     if trivia_item:
         active_trivia[ctx.channel.id] = {
@@ -647,7 +654,7 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    # Procesar comandos primero
+    # Procesar comandos
     await bot.process_commands(message)
 
     # Si el mensaje es un DM y el usuario está en dm_forwarding, reenvía al canal SPECIAL_HELP_CHANNEL.
@@ -669,8 +676,8 @@ async def on_message(message):
                         print(f"Error forwarding DM from {message.author.id}: {e}")
                     await asyncio.sleep(1)
 
-    # Procesamiento de respuestas de trivia (para cualquier canal donde se publicó la trivia)
-    if message.channel.id in active_trivia:
+    # Procesamiento de respuestas de trivia (solo en canales, no en DM)
+    if message.guild is not None and message.channel.id in active_trivia:
         trivia_data = active_trivia[message.channel.id]
         user_attempts = trivia_data["attempts"].get(message.author.id, 0)
         max_attempts_per_user = 3
@@ -723,7 +730,7 @@ async def event_notifier():
     while not bot.is_closed():
         now = datetime.datetime.now(tz_peru)
         with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-            cur.execute("SELECT id, name, event_datetime, target_stage, notified_10h, notified_2h FROM calendar_events")
+            cur.execute("SELECT id, name, event_datetime, target_stage, notified_10h, notified_2h FROM calendar_events ORDER BY event_datetime")
             events = cur.fetchall()
         for ev in events:
             event_dt = ev["event_datetime"]

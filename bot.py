@@ -121,7 +121,7 @@ def init_db():
             )
         """)
         
-        # Tabla de eventos del calendario, en zona horaria de Perú
+        # Tabla de eventos del calendario (se requiere que existan todas las columnas)
         cur.execute("""
             CREATE TABLE IF NOT EXISTS calendar_events (
                 id SERIAL PRIMARY KEY,
@@ -132,6 +132,12 @@ def init_db():
                 notified_2h BOOLEAN DEFAULT FALSE
             )
         """)
+        # Forzar que las columnas existan en caso de que la tabla ya esté creada con otro esquema
+        cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS name TEXT NOT NULL DEFAULT ''")
+        cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS event_datetime TIMESTAMP WITH TIME ZONE NOT NULL")
+        cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS target_stage INTEGER NOT NULL DEFAULT 0")
+        cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS notified_10h BOOLEAN DEFAULT FALSE")
+        cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS notified_2h BOOLEAN DEFAULT FALSE")
 init_db()
 
 ######################################
@@ -488,9 +494,10 @@ async def avanzar_etapa(ctx, etapa: int):
         for user_id, participant in advanced:
             participant["etapa"] = etapa
             upsert_participant(user_id, participant)
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(1)  # Delay para evitar sobrecarga
         await ctx.send(f"✅ Etapa actualizada a {etapa}. {limite_jugadores} jugadores han avanzado a esta etapa.")
         if etapa > old_stage:
+            # Notificar a los jugadores que avanzaron
             for user_id, participant in advanced:
                 user = bot.get_user(int(user_id))
                 if user is not None:
@@ -510,6 +517,7 @@ async def avanzar_etapa(ctx, etapa: int):
                     except Exception as e:
                         print(f"Error enviando DM a {user_id}: {e}")
                     await asyncio.sleep(1)
+            # Notificar a los que quedaron fuera (mantienen la etapa antigua)
             for user_id, participant in data["participants"].items():
                 if participant.get("etapa", old_stage) == old_stage and user_id not in [uid for uid, _ in advanced]:
                     user = bot.get_user(int(user_id))
@@ -660,7 +668,7 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    # Si el mensaje es un DM y el usuario está en dm_forwarding, reenvía al canal SPECIAL_HELP_CHANNEL
+    # Si el mensaje es un DM y el usuario está en dm_forwarding, reenvía al canal SPECIAL_HELP_CHANNEL.
     if message.guild is None:
         if message.author.id in dm_forwarding:
             end_time = dm_forwarding[message.author.id]
@@ -680,8 +688,8 @@ async def on_message(message):
                     await asyncio.sleep(1)
     await bot.process_commands(message)
     
-    # Procesamiento de respuestas de trivia (solo en canales, no DM)
-    if message.guild is not None and message.channel.id in active_trivia:
+    # Procesamiento de respuestas de trivia (sin filtrar por guild, para asegurar que se procesen en canales)
+    if message.channel.id in active_trivia:
         trivia_data = active_trivia[message.channel.id]
         user_attempts = trivia_data["attempts"].get(message.author.id, 0)
         max_attempts_per_user = 3

@@ -121,7 +121,7 @@ def init_db():
             )
         """)
         
-        # Tabla de eventos del calendario (se requiere que existan todas las columnas)
+        # Tabla de eventos del calendario, en zona horaria de Perú
         cur.execute("""
             CREATE TABLE IF NOT EXISTS calendar_events (
                 id SERIAL PRIMARY KEY,
@@ -132,7 +132,7 @@ def init_db():
                 notified_2h BOOLEAN DEFAULT FALSE
             )
         """)
-        # Forzar que las columnas existan en caso de que la tabla ya esté creada con otro esquema
+        # Asegurar que las columnas existen (en caso de que la tabla ya existiera)
         cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS name TEXT NOT NULL DEFAULT ''")
         cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS event_datetime TIMESTAMP WITH TIME ZONE NOT NULL")
         cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS target_stage INTEGER NOT NULL DEFAULT 0")
@@ -144,7 +144,7 @@ init_db()
 # VARIABLES GLOBALES ADICIONALES
 ######################################
 # Para el reenvío de mensajes DM en condiciones especiales (etapas 6, 7, 8)
-dm_forwarding = {}  # Diccionario: user_id (str) -> None (indefinido) o datetime (fecha de expiración)
+dm_forwarding = {}  # Diccionario: user_id (str) -> None (reenvío indefinido) o datetime (fecha de expiración)
 
 ######################################
 # CONFIGURACIÓN INICIAL DEL TORNEO
@@ -497,7 +497,6 @@ async def avanzar_etapa(ctx, etapa: int):
             await asyncio.sleep(1)  # Delay para evitar sobrecarga
         await ctx.send(f"✅ Etapa actualizada a {etapa}. {limite_jugadores} jugadores han avanzado a esta etapa.")
         if etapa > old_stage:
-            # Notificar a los jugadores que avanzaron
             for user_id, participant in advanced:
                 user = bot.get_user(int(user_id))
                 if user is not None:
@@ -517,7 +516,6 @@ async def avanzar_etapa(ctx, etapa: int):
                     except Exception as e:
                         print(f"Error enviando DM a {user_id}: {e}")
                     await asyncio.sleep(1)
-            # Notificar a los que quedaron fuera (mantienen la etapa antigua)
             for user_id, participant in data["participants"].items():
                 if participant.get("etapa", old_stage) == old_stage and user_id not in [uid for uid, _ in advanced]:
                     user = bot.get_user(int(user_id))
@@ -649,6 +647,7 @@ async def on_message_no_prefix(message):
     ctx = await bot.get_context(message)
     if ctx.valid:
         return
+    # Procesar comandos sin prefijo específicos
     if content == 'trivia':
         await trivia(ctx)
     elif content == 'chiste':
@@ -657,8 +656,7 @@ async def on_message_no_prefix(message):
         await ranking(ctx)
     elif content == 'topmejores':
         await topmejores(ctx)
-    else:
-        await bot.process_commands(message)
+    # No llamar a process_commands aquí para evitar duplicados
 
 ######################################
 # EVENTO ON_MESSAGE (DM FORWARDING Y TRIVIA RESPUESTAS)
@@ -686,14 +684,16 @@ async def on_message(message):
                     except Exception as e:
                         print(f"Error forwarding DM from {message.author.id}: {e}")
                     await asyncio.sleep(1)
+    # Llamar a process_commands solo una vez en este on_message
     await bot.process_commands(message)
     
-    # Procesamiento de respuestas de trivia (sin filtrar por guild, para asegurar que se procesen en canales)
-    if message.channel.id in active_trivia:
+    # Procesamiento de respuestas de trivia (solo en canales, no en DM)
+    if message.guild is not None and message.channel.id in active_trivia:
         trivia_data = active_trivia[message.channel.id]
         user_attempts = trivia_data["attempts"].get(message.author.id, 0)
         max_attempts_per_user = 3
         if user_attempts >= max_attempts_per_user:
+            # Enviar el mensaje de agotamiento solo una vez
             if user_attempts == max_attempts_per_user:
                 await message.channel.send(f"❌ Has agotado tus intentos, {message.author.mention}.")
                 trivia_data["attempts"][message.author.id] = max_attempts_per_user + 1

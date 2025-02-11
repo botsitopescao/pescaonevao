@@ -226,8 +226,7 @@ def add_jokes_bulk(jokes_list):
     with conn.cursor() as cur:
         for joke in jokes_list:
             cur.execute("INSERT INTO jokes (joke_text) VALUES (%s)", (joke,))
-            asyncio.sleep(0.1)  # Delay para evitar múltiples solicitudes seguidas
-    # Vaciar la cache para que se recargue la próxima vez
+            asyncio.sleep(0.1)
     global global_jokes_cache
     global_jokes_cache = []
 
@@ -265,7 +264,7 @@ def add_trivias_bulk(trivias_list):
             hint1 = trivia.get("hint1", "")
             hint2 = trivia.get("hint2", "")
             cur.execute("INSERT INTO trivias (question, answer, hint1, hint2) VALUES (%s, %s, %s, %s)", (question, answer, hint1, hint2))
-            asyncio.sleep(0.1)  # Delay para evitar múltiples solicitudes seguidas
+            asyncio.sleep(0.1)
     global global_trivias_cache
     global_trivias_cache = []
 
@@ -279,7 +278,7 @@ def delete_all_trivias():
 # INICIALIZACIÓN DEL BOT
 ######################################
 intents = discord.Intents.default()
-intents.members = True  # Asegúrate de tener habilitado "Server Members Intent" en el portal de Discord
+intents.members = True
 intents.messages = True
 intents.message_content = True
 bot = commands.Bot(command_prefix=PREFIX, intents=intents)
@@ -289,7 +288,7 @@ async def send_public_message(message: str, view: discord.ui.View = None):
     if public_channel:
         try:
             await public_channel.send(message, view=view)
-            await asyncio.sleep(1)  # Delay para evitar múltiples mensajes seguidos
+            await asyncio.sleep(1)
         except discord.HTTPException as e:
             print(f"Error al enviar mensaje público: {e}")
     else:
@@ -310,20 +309,15 @@ def check_auth(req):
 def home_page():
     return "El bot está funcionando!", 200
 
-# Otros endpoints de la API privada (sin cambios)...
-
 ######################################
 # FUNCIONES AUXILIARES
 ######################################
 def is_owner_and_allowed(ctx):
-    # Solo se permite si el autor es OWNER_ID y el comando se envía por DM o en el canal SPECIAL_HELP_CHANNEL.
     return ctx.author.id == OWNER_ID and (isinstance(ctx.channel, discord.DMChannel) or ctx.channel.id == SPECIAL_HELP_CHANNEL)
 
 ######################################
 # COMANDOS PRO (SOLO OWNER_ID)
 ######################################
-# Estos comandos solo funcionarán si se usan vía DM o en el canal SPECIAL_HELP_CHANNEL y el autor es OWNER_ID.
-
 @bot.command()
 async def agregar_puntos(ctx, user: discord.User, puntos: int):
     if not is_owner_and_allowed(ctx):
@@ -415,17 +409,39 @@ async def avanzar_etapa(ctx, etapa: int):
     if not is_owner_and_allowed(ctx):
         return
     global current_stage
+    old_stage = current_stage
     current_stage = etapa
     data = get_all_participants()
     limite_jugadores = STAGES.get(etapa, None)
     if limite_jugadores is not None:
         sorted_players = sorted(data["participants"].items(), key=lambda item: int(item[1].get("puntuacion", 0)), reverse=True)
-        seleccionados = sorted_players[:limite_jugadores]
-        for user_id, participant in seleccionados:
+        advanced = sorted_players[:limite_jugadores]
+        for user_id, participant in advanced:
             participant["etapa"] = etapa
             upsert_participant(user_id, participant)
             await asyncio.sleep(0.1)
         await ctx.send(f"✅ Etapa actualizada a {etapa}. {limite_jugadores} jugadores han avanzado a esta etapa.")
+        # Solo enviar notificaciones si se avanza a una etapa superior
+        if etapa > old_stage:
+            # Notificar a los jugadores que avanzaron
+            for user_id, participant in advanced:
+                user = bot.get_user(int(user_id))
+                if user is not None:
+                    try:
+                        await user.send(f"🎉 ¡Felicidades! Has avanzado a la etapa {etapa}.")
+                    except Exception as e:
+                        print(f"Error enviando DM a {user_id}: {e}")
+                await asyncio.sleep(1)
+            # Notificar a los jugadores que quedaron fuera (aquellos que siguen en la etapa antigua)
+            for user_id, participant in data["participants"].items():
+                if participant.get("etapa", old_stage) == old_stage and user_id not in [uid for uid, _ in advanced]:
+                    user = bot.get_user(int(user_id))
+                    if user is not None:
+                        try:
+                            await user.send(f"😢 Lamentamos informarte que no has avanzado a la etapa {etapa} y has sido eliminado del torneo.")
+                        except Exception as e:
+                            print(f"Error enviando DM a {user_id}: {e}")
+                    await asyncio.sleep(1)
         await asyncio.sleep(1)
     else:
         await ctx.send(f"❌ La etapa {etapa} no está definida en STAGES.")
@@ -586,6 +602,7 @@ async def on_message(message):
         max_attempts_per_user = 3
 
         if user_attempts >= max_attempts_per_user:
+            # Enviar la notificación de agotamiento de intentos una sola vez.
             if user_attempts == max_attempts_per_user:
                 await message.channel.send(f"🚫 {message.author.mention}, has alcanzado el número máximo de intentos para esta trivia.")
                 trivia_data["attempts"][message.author.id] = max_attempts_per_user + 1

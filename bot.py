@@ -435,30 +435,15 @@ async def borrar_usuario(ctx, user_id: str):
     await ctx.send(f"✅ Se ha eliminado el usuario con ID {user_id} del registro.")
     await asyncio.sleep(1)
 
-# Comandos de eventos (SOLO OWNER_ID)
-@bot.command()
-async def agregar_evento(ctx, date: str, time: str, *, event_name: str):
-    if not is_owner_and_allowed(ctx):
-        return
-    dt_str = f"{date} {time}"
-    try:
-        # Convertir la fecha y hora en formato dd/mm/aaaa hh:mm a la zona horaria de Perú
-        event_dt = datetime.datetime.strptime(dt_str, "%d/%m/%Y %H:%M")
-        event_dt = event_dt.replace(tzinfo=ZoneInfo("America/Lima"))
-    except Exception as e:
-        await ctx.send("❌ Formato de fecha u hora incorrecto. Usa dd/mm/aaaa hh:mm")
-        return
-    target_stage = current_stage
-    with conn.cursor() as cur:
-        cur.execute("INSERT INTO calendar_events (name, event_datetime, target_stage, notified_10h, notified_2h) VALUES (%s, %s, %s, FALSE, FALSE)", (event_name, event_dt, target_stage))
-    await ctx.send(f"✅ Evento '{event_name}' agregado para el {dt_str} (Etapa {target_stage}).")
-
+######################################
+# COMANDOS DE EVENTOS (SOLO OWNER_ID) - NUEVOS COMANDOS
+######################################
 @bot.command()
 async def ver_eventos(ctx):
     if not is_owner_and_allowed(ctx):
         return
     with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-        cur.execute("SELECT id, name, event_datetime, target_stage FROM calendar_events ORDER BY event_datetime")
+        cur.execute("SELECT id, name, event_datetime FROM calendar_events ORDER BY id")
         events = cur.fetchall()
     if events:
         lines = ["**Eventos en el Calendario:**"]
@@ -466,10 +451,25 @@ async def ver_eventos(ctx):
             dt = ev["event_datetime"]
             date_str = dt.strftime("%d/%m/%Y")
             time_str = dt.strftime("%H:%M")
-            lines.append(f"ID: {ev['id']} - {date_str} {time_str} - {ev['name']} (Etapa {ev['target_stage']})")
+            lines.append(f"ID: {ev['id']} - {date_str} {time_str} - {ev['name']}")
         await ctx.send("\n".join(lines))
     else:
         await ctx.send("No hay eventos en el calendario.")
+
+@bot.command()
+async def crear_evento(ctx, date: str, time: str, *, event_name: str):
+    if not is_owner_and_allowed(ctx):
+        return
+    dt_str = f"{date} {time}"
+    try:
+        event_dt = datetime.datetime.strptime(dt_str, "%d/%m/%Y %H:%M")
+        event_dt = event_dt.replace(tzinfo=ZoneInfo("America/Lima"))
+    except Exception as e:
+        await ctx.send("❌ Formato de fecha u hora incorrecto. Usa dd/mm/aaaa hh:mm")
+        return
+    with conn.cursor() as cur:
+        cur.execute("INSERT INTO calendar_events (name, event_datetime, target_stage, notified_10h, notified_2h) VALUES (%s, %s, %s, FALSE, FALSE)", (event_name, event_dt, 0))
+    await ctx.send(f"✅ Evento '{event_name}' creado para el {dt_str}.")
 
 @bot.command()
 async def borrar_evento(ctx, event_id: int):
@@ -477,7 +477,10 @@ async def borrar_evento(ctx, event_id: int):
         return
     with conn.cursor() as cur:
         cur.execute("DELETE FROM calendar_events WHERE id = %s", (event_id,))
-    await ctx.send(f"✅ Evento con ID {event_id} borrado del calendario.")
+        if cur.rowcount > 0:
+            await ctx.send(f"✅ Evento con ID {event_id} borrado.")
+        else:
+            await ctx.send(f"❌ No se encontró un evento con ID {event_id}.")
 
 @bot.command()
 async def avanzar_etapa(ctx, etapa: int):
@@ -643,20 +646,14 @@ async def topmejores(ctx):
 async def on_message_no_prefix(message):
     if message.author.bot:
         return
-    content = message.content.lower().strip()
-    ctx = await bot.get_context(message)
-    if ctx.valid:
+    if message.content.startswith(PREFIX):
         return
-    # Procesar comandos sin prefijo específicos
-    if content == 'trivia':
-        await trivia(ctx)
-    elif content == 'chiste':
-        await chiste(ctx)
-    elif content == 'ranking':
-        await ranking(ctx)
-    elif content == 'topmejores':
-        await topmejores(ctx)
-    # No llamar a process_commands aquí para evitar duplicados
+    content = message.content.lower().strip()
+    if content in ('trivia', 'chiste', 'ranking', 'topmejores'):
+        message.content = PREFIX + message.content
+        message._nonprefix_command_invoked = True
+        ctx = await bot.get_context(message)
+        await bot.invoke(ctx)
 
 ######################################
 # EVENTO ON_MESSAGE (DM FORWARDING Y TRIVIA RESPUESTAS)
@@ -684,7 +681,8 @@ async def on_message(message):
                     except Exception as e:
                         print(f"Error forwarding DM from {message.author.id}: {e}")
                     await asyncio.sleep(1)
-    # Llamar a process_commands solo una vez en este on_message
+    if getattr(message, '_nonprefix_command_invoked', False):
+        return
     await bot.process_commands(message)
     
     # Procesamiento de respuestas de trivia (solo en canales, no en DM)
@@ -693,7 +691,6 @@ async def on_message(message):
         user_attempts = trivia_data["attempts"].get(message.author.id, 0)
         max_attempts_per_user = 3
         if user_attempts >= max_attempts_per_user:
-            # Enviar el mensaje de agotamiento solo una vez
             if user_attempts == max_attempts_per_user:
                 await message.channel.send(f"❌ Has agotado tus intentos, {message.author.mention}.")
                 trivia_data["attempts"][message.author.id] = max_attempts_per_user + 1
@@ -729,63 +726,11 @@ async def on_command_error(ctx, error):
         raise error
 
 ######################################
-# EVENTO ON_READY y TAREA DE NOTIFICACIONES DE EVENTOS
+# EVENTO ON_READY
 ######################################
 @bot.event
 async def on_ready():
     print(f'Bot conectado como {bot.user.name}')
-    bot.loop.create_task(event_notifier())
-
-async def event_notifier():
-    await bot.wait_until_ready()
-    tz_peru = ZoneInfo("America/Lima")
-    while not bot.is_closed():
-        now = datetime.datetime.now(tz_peru)
-        with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-            cur.execute("SELECT id, name, event_datetime, target_stage, notified_10h, notified_2h FROM calendar_events")
-            events = cur.fetchall()
-        for ev in events:
-            event_dt = ev["event_datetime"]
-            diff = (event_dt - now).total_seconds()
-            # Notificar 10 horas antes
-            if diff > 0 and diff <= 10 * 3600 and not ev["notified_10h"]:
-                with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-                    cur.execute("SELECT user_id, country FROM registrations WHERE etapa = %s", (ev["target_stage"],))
-                    users = cur.fetchall()
-                for user_row in users:
-                    user = bot.get_user(int(user_row["user_id"]))
-                    if user is not None:
-                        tz_user = ZoneInfo(country_timezones.get(user_row["country"], "UTC"))
-                        local_dt = event_dt.astimezone(tz_user)
-                        msg = (f"⏰ Faltan 10 horas para '{ev['name']}', que se realizará el "
-                               f"{local_dt.strftime('%d/%m/%Y %H:%M')} hora {user_row['country']}. Recuerda que si llegas tarde, quedarás automáticamente eliminado del torneo así tengas puntaje alto.")
-                        try:
-                            await user.send(msg)
-                        except Exception as e:
-                            print(f"Error enviando DM de 10 horas a {user_row['user_id']}: {e}")
-                        await asyncio.sleep(1)
-                with conn.cursor() as cur:
-                    cur.execute("UPDATE calendar_events SET notified_10h = TRUE WHERE id = %s", (ev["id"],))
-            # Notificar 2 horas antes
-            if diff > 0 and diff <= 2 * 3600 and not ev["notified_2h"]:
-                with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-                    cur.execute("SELECT user_id, country FROM registrations WHERE etapa = %s", (ev["target_stage"],))
-                    users = cur.fetchall()
-                for user_row in users:
-                    user = bot.get_user(int(user_row["user_id"]))
-                    if user is not None:
-                        tz_user = ZoneInfo(country_timezones.get(user_row["country"], "UTC"))
-                        local_dt = event_dt.astimezone(tz_user)
-                        msg = (f"⏰ Faltan 2 horas para '{ev['name']}', que se realizará el "
-                               f"{local_dt.strftime('%d/%m/%Y %H:%M')} hora {user_row['country']}. Recuerda que si llegas tarde, quedarás automáticamente eliminado del torneo así tengas puntaje alto.")
-                        try:
-                            await user.send(msg)
-                        except Exception as e:
-                            print(f"Error enviando DM de 2 horas a {user_row['user_id']}: {e}")
-                        await asyncio.sleep(1)
-                with conn.cursor() as cur:
-                    cur.execute("UPDATE calendar_events SET notified_2h = TRUE WHERE id = %s", (ev["id"],))
-        await asyncio.sleep(60)
 
 ######################################
 # SERVIDOR WEB PARA MANTENER EL BOT ACTIVO (API PRIVADA)

@@ -48,6 +48,14 @@ def init_db():
                 etapa INTEGER DEFAULT 1
             )
         """)
+        # Asegurarse de que la tabla 'registrations' tenga todas las columnas necesarias
+        cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS discord_name TEXT")
+        cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS fortnite_username TEXT")
+        cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS platform TEXT")
+        cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS country TEXT")
+        cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS puntuacion INTEGER DEFAULT 0")
+        cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS etapa INTEGER DEFAULT 1")
+        
         # Tabla de chistes: se crea la tabla (si no existe) y se asegura que exista la columna "joke_text"
         cur.execute("""
             CREATE TABLE IF NOT EXISTS jokes (
@@ -58,6 +66,7 @@ def init_db():
             ALTER TABLE jokes
             ADD COLUMN IF NOT EXISTS joke_text TEXT NOT NULL DEFAULT ''
         """)
+        
         # Tabla de trivias: se crea la tabla (si no existe) y se aseguran las columnas necesarias
         cur.execute("""
             CREATE TABLE IF NOT EXISTS trivias (
@@ -76,6 +85,7 @@ def init_db():
             ALTER TABLE trivias
             ADD COLUMN IF NOT EXISTS hint TEXT
         """)
+        
         # Tabla de memes
         cur.execute("""
             CREATE TABLE IF NOT EXISTS memes (
@@ -83,6 +93,7 @@ def init_db():
                 url TEXT NOT NULL
             )
         """)
+        
         # Tabla de eventos del calendario
         cur.execute("""
             CREATE TABLE IF NOT EXISTS calendar_events (

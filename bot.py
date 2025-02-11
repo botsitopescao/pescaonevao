@@ -48,20 +48,35 @@ def init_db():
                 etapa INTEGER DEFAULT 1
             )
         """)
+        # Tabla de chistes: se crea la tabla (si no existe) y se asegura que exista la columna "content"
         cur.execute("""
             CREATE TABLE IF NOT EXISTS jokes (
-                id SERIAL PRIMARY KEY,
-                content TEXT NOT NULL
+                id SERIAL PRIMARY KEY
             )
         """)
         cur.execute("""
+            ALTER TABLE jokes
+            ADD COLUMN IF NOT EXISTS content TEXT NOT NULL DEFAULT ''
+        """)
+        # Tabla de trivias: se crea la tabla (si no existe) y se aseguran las columnas necesarias
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS trivias (
-                id SERIAL PRIMARY KEY,
-                question TEXT NOT NULL,
-                answer TEXT NOT NULL,
-                hint TEXT
+                id SERIAL PRIMARY KEY
             )
         """)
+        cur.execute("""
+            ALTER TABLE trivias
+            ADD COLUMN IF NOT EXISTS question TEXT NOT NULL DEFAULT ''
+        """)
+        cur.execute("""
+            ALTER TABLE trivias
+            ADD COLUMN IF NOT EXISTS answer TEXT NOT NULL DEFAULT ''
+        """)
+        cur.execute("""
+            ALTER TABLE trivias
+            ADD COLUMN IF NOT EXISTS hint TEXT
+        """)
+        # Tabla de memes
         cur.execute("""
             CREATE TABLE IF NOT EXISTS memes (
                 id SERIAL PRIMARY KEY,

@@ -134,6 +134,10 @@ forwarding_end_time = None
 ######################################
 active_trivia = {}  # key: channel.id, value: {"question": ..., "answer": ..., "hint": ...}
 
+# Variables globales para cache de chistes y trivias (para evitar repeticiones hasta agotar la lista)
+global_jokes_cache = []
+global_trivias_cache = []
+
 ######################################
 # FUNCIONES PARA LA BASE DE DATOS
 ######################################
@@ -199,32 +203,49 @@ def normalize_string(s):
 # FUNCIONES DE CHISTES Y TRIVIAS
 ######################################
 def get_random_joke():
-    with conn.cursor() as cur:
-        cur.execute("SELECT joke_text FROM jokes ORDER BY RANDOM() LIMIT 1")
-        result = cur.fetchone()
-        if result:
-            return result[0]
-        else:
-            return "No tengo chistes para contar ahora mismo."
+    global global_jokes_cache
+    # Si la cache está vacía, cargar todos los chistes desde la base de datos.
+    if not global_jokes_cache:
+        with conn.cursor() as cur:
+            cur.execute("SELECT joke_text FROM jokes")
+            rows = cur.fetchall()
+            global_jokes_cache = [row[0] for row in rows]
+    if global_jokes_cache:
+        index = random.randrange(len(global_jokes_cache))
+        joke = global_jokes_cache.pop(index)
+        return joke
+    else:
+        return "No tengo chistes para contar ahora mismo."
 
 def add_jokes_bulk(jokes_list):
     with conn.cursor() as cur:
         for joke in jokes_list:
             cur.execute("INSERT INTO jokes (joke_text) VALUES (%s)", (joke,))
             asyncio.sleep(0.1)  # Delay para evitar múltiples solicitudes seguidas
+    # Vaciar la cache para que se recargue la próxima vez
+    global global_jokes_cache
+    global_jokes_cache = []
 
 def delete_all_jokes():
     with conn.cursor() as cur:
         cur.execute("DELETE FROM jokes")
+    global global_jokes_cache
+    global_jokes_cache = []
 
 def get_random_trivia():
-    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-        cur.execute("SELECT * FROM trivias ORDER BY RANDOM() LIMIT 1")
-        result = cur.fetchone()
-        if result:
-            return {"question": result["question"], "answer": result["answer"], "hint": result.get("hint", "")}
-        else:
-            return None
+    global global_trivias_cache
+    # Si la cache está vacía, cargar todas las trivias desde la base de datos.
+    if not global_trivias_cache:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT * FROM trivias")
+            rows = cur.fetchall()
+            global_trivias_cache = rows
+    if global_trivias_cache:
+        index = random.randrange(len(global_trivias_cache))
+        trivia = global_trivias_cache.pop(index)
+        return {"question": trivia["question"], "answer": trivia["answer"], "hint": trivia.get("hint", "")}
+    else:
+        return None
 
 def add_trivias_bulk(trivias_list):
     with conn.cursor() as cur:
@@ -234,10 +255,14 @@ def add_trivias_bulk(trivias_list):
             hint = trivia.get("hint", "")
             cur.execute("INSERT INTO trivias (question, answer, hint) VALUES (%s, %s, %s)", (question, answer, hint))
             asyncio.sleep(0.1)  # Delay para evitar múltiples solicitudes seguidas
+    global global_trivias_cache
+    global_trivias_cache = []
 
 def delete_all_trivias():
     with conn.cursor() as cur:
         cur.execute("DELETE FROM trivias")
+    global global_trivias_cache
+    global_trivias_cache = []
 
 ######################################
 # INICIALIZACIÓN DEL BOT
@@ -364,6 +389,15 @@ async def registrar_usuario(ctx, *, args: str):
     }
     upsert_participant(discord_id, participant)
     await ctx.send(f"✅ Usuario {discord_name} registrado correctamente con Discord ID {discord_id}.")
+    await asyncio.sleep(1)
+
+@bot.command()
+async def borrar_usuario(ctx, user_id: str):
+    if not is_owner_and_allowed(ctx):
+        return
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM registrations WHERE user_id = %s", (user_id,))
+    await ctx.send(f"✅ Se ha eliminado el usuario con ID {user_id} del registro.")
     await asyncio.sleep(1)
 
 @bot.command()

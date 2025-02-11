@@ -132,7 +132,7 @@ def init_db():
                 notified_2h BOOLEAN DEFAULT FALSE
             )
         """)
-        # Asegurar que las columnas existen (en caso de que la tabla ya existiera)
+        # Forzar la existencia de las columnas en caso de que la tabla ya exista con otro esquema
         cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS name TEXT NOT NULL DEFAULT ''")
         cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS event_datetime TIMESTAMP WITH TIME ZONE NOT NULL")
         cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS target_stage INTEGER NOT NULL DEFAULT 0")
@@ -639,25 +639,6 @@ async def topmejores(ctx):
     else:
         await ctx.send("No hay participantes en el torneo.")
 
-@bot.listen('on_message')
-async def on_message_no_prefix(message):
-    if message.author.bot:
-        return
-    content = message.content.lower().strip()
-    ctx = await bot.get_context(message)
-    if ctx.valid:
-        return
-    # Procesar comandos sin prefijo específicos
-    if content == 'trivia':
-        await trivia(ctx)
-    elif content == 'chiste':
-        await chiste(ctx)
-    elif content == 'ranking':
-        await ranking(ctx)
-    elif content == 'topmejores':
-        await topmejores(ctx)
-    # No llamar a process_commands aquí para evitar duplicados
-
 ######################################
 # EVENTO ON_MESSAGE (DM FORWARDING Y TRIVIA RESPUESTAS)
 ######################################
@@ -665,6 +646,9 @@ async def on_message_no_prefix(message):
 async def on_message(message):
     if message.author.bot:
         return
+
+    # Procesar comandos primero
+    await bot.process_commands(message)
 
     # Si el mensaje es un DM y el usuario está en dm_forwarding, reenvía al canal SPECIAL_HELP_CHANNEL.
     if message.guild is None:
@@ -684,16 +668,13 @@ async def on_message(message):
                     except Exception as e:
                         print(f"Error forwarding DM from {message.author.id}: {e}")
                     await asyncio.sleep(1)
-    # Llamar a process_commands solo una vez en este on_message
-    await bot.process_commands(message)
-    
-    # Procesamiento de respuestas de trivia (solo en canales, no en DM)
-    if message.guild is not None and message.channel.id in active_trivia:
+
+    # Procesamiento de respuestas de trivia (para cualquier canal donde se publicó la trivia)
+    if message.channel.id in active_trivia:
         trivia_data = active_trivia[message.channel.id]
         user_attempts = trivia_data["attempts"].get(message.author.id, 0)
         max_attempts_per_user = 3
         if user_attempts >= max_attempts_per_user:
-            # Enviar el mensaje de agotamiento solo una vez
             if user_attempts == max_attempts_per_user:
                 await message.channel.send(f"❌ Has agotado tus intentos, {message.author.mention}.")
                 trivia_data["attempts"][message.author.id] = max_attempts_per_user + 1

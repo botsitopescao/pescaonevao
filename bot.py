@@ -122,7 +122,7 @@ def init_db():
         """)
         
         # Tabla de eventos del calendario, en zona horaria de Perú.
-        # Nota: Se incluye la columna "event_time" obligatoria (se usará para almacenar la fecha y hora)
+        # Nota: Se incluye la columna "event_time" obligatoria y se inserta el mismo valor en event_time y event_datetime.
         cur.execute("""
             CREATE TABLE IF NOT EXISTS calendar_events (
                 id SERIAL PRIMARY KEY,
@@ -442,7 +442,7 @@ async def borrar_usuario(ctx, user_id: str):
 async def agregar_evento(ctx, *, args: str):
     if not is_owner_and_allowed(ctx):
         return
-    # Espera el formato: "dd/mm/aaaa | hh:mm | Nombre del evento"
+    # Formato esperado: "dd/mm/aaaa | hh:mm | Nombre del evento"
     parts = args.split("|")
     if len(parts) != 3:
         await ctx.send("❌ Formato incorrecto. Utiliza: !agregar_evento dd/mm/aaaa | hh:mm | Nombre del evento")
@@ -458,7 +458,7 @@ async def agregar_evento(ctx, *, args: str):
         await ctx.send("❌ Formato de fecha u hora incorrecto. Utiliza: dd/mm/aaaa | hh:mm")
         return
     target_stage = current_stage
-    # Insertar en ambas columnas event_time y event_datetime con el mismo valor.
+    # Insertar en event_time y event_datetime con el mismo valor.
     with conn.cursor() as cur:
         cur.execute(
             "INSERT INTO calendar_events (event_time, event_datetime, name, target_stage, notified_10h, notified_2h) VALUES (%s, %s, %s, %s, FALSE, FALSE)",
@@ -587,28 +587,30 @@ async def eliminar_todas_trivias(ctx):
     await asyncio.sleep(1)
 
 ######################################
-# EVENTO ON_MESSAGE ÚNICO (Procesa comandos sin prefijo y respuestas de trivia)
+# EVENTO ON_MESSAGE ÚNICO
 ######################################
 @bot.event
 async def on_message(message):
     if message.author.bot:
         return
 
-    # Obtener contexto para ver si el mensaje es un comando válido con prefijo
-    ctx = await bot.get_context(message)
-    if not ctx.valid:
+    # Si el mensaje no comienza con el prefijo, y es uno de los comandos sin prefijo, invócalos.
+    if not message.content.startswith(PREFIX):
         content = message.content.lower().strip()
-        # Permitir el uso de comandos sin prefijo para: trivia, chiste, ranking, topmejores
         if content == "trivia":
+            ctx = await bot.get_context(message)
             await trivia(ctx)
             return
         elif content == "chiste":
+            ctx = await bot.get_context(message)
             await chiste(ctx)
             return
         elif content == "ranking":
+            ctx = await bot.get_context(message)
             await ranking(ctx)
             return
         elif content == "topmejores":
+            ctx = await bot.get_context(message)
             await topmejores(ctx)
             return
 
@@ -633,7 +635,7 @@ async def on_message(message):
                         print(f"Error forwarding DM from {message.author.id}: {e}")
                     await asyncio.sleep(1)
 
-    # Procesamiento de respuestas de trivia (solo en canales, no DM)
+    # Procesamiento de respuestas de trivia (solo en canales, no en DM)
     if message.guild is not None and message.channel.id in active_trivia:
         trivia_data = active_trivia[message.channel.id]
         user_attempts = trivia_data["attempts"].get(message.author.id, 0)

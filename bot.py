@@ -280,12 +280,13 @@ def home_page():
 # FUNCIONES AUXILIARES
 ######################################
 def is_owner_and_allowed(ctx):
-    return ctx.author.id == OWNER_ID and (ctx.channel.id == SPECIAL_HELP_CHANNEL or isinstance(ctx.channel, discord.DMChannel))
+    # Solo se permite si el autor es OWNER_ID y el comando se envía por DM o en el canal SPECIAL_HELP_CHANNEL.
+    return ctx.author.id == OWNER_ID and (isinstance(ctx.channel, discord.DMChannel) or ctx.channel.id == SPECIAL_HELP_CHANNEL)
 
 ######################################
 # COMANDOS PRO (SOLO OWNER_ID)
 ######################################
-# Comandos Pro
+# Estos comandos solo funcionarán si se usan vía DM o en el canal SPECIAL_HELP_CHANNEL y el autor es OWNER_ID.
 
 @bot.command()
 async def agregar_puntos(ctx, user: discord.User, puntos: int):
@@ -436,7 +437,7 @@ async def eliminar_todas_trivias(ctx):
 ######################################
 # COMANDOS COMUNES (DISPONIBLES PARA TODOS)
 ######################################
-# Comandos Comunes
+# Estos comandos funcionarán para cualquier usuario, sin restricciones, y se podrán activar sin el prefijo.
 
 @bot.command()
 @cooldown(1, 10, BucketType.user)  # Cooldown de 10 segundos por usuario

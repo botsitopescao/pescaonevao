@@ -440,7 +440,7 @@ async def eliminar_todas_trivias(ctx):
 
 @bot.command()
 @cooldown(1, 10, BucketType.user)  # Cooldown de 10 segundos por usuario
-async def trivia_command(ctx):
+async def trivia(ctx):
     if ctx.author.bot:
         return
     if ctx.channel.id in active_trivia:
@@ -459,7 +459,7 @@ async def trivia_command(ctx):
 
 @bot.command()
 @cooldown(1, 10, BucketType.user)  # Cooldown de 10 segundos por usuario
-async def chiste_command(ctx):
+async def chiste(ctx):
     if ctx.author.bot:
         return
     joke = get_random_joke()
@@ -467,7 +467,7 @@ async def chiste_command(ctx):
 
 @bot.command()
 @cooldown(1, 10, BucketType.user)  # Cooldown de 10 segundos por usuario
-async def ranking_command(ctx):
+async def ranking(ctx):
     if ctx.author.bot:
         return
     user_id = str(ctx.author.id)
@@ -480,7 +480,7 @@ async def ranking_command(ctx):
 
 @bot.command()
 @cooldown(1, 10, BucketType.user)  # Cooldown de 10 segundos por usuario
-async def topmejores_command(ctx):
+async def topmejores(ctx):
     if ctx.author.bot:
         return
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -510,13 +510,13 @@ async def on_message_no_prefix(message):
     if ctx.valid:
         return  # El mensaje ya es un comando válido
     if content == 'trivia':
-        await trivia_command(ctx)
+        await trivia(ctx)
     elif content == 'chiste':
-        await chiste_command(ctx)
+        await chiste(ctx)
     elif content == 'ranking':
-        await ranking_command(ctx)
+        await ranking(ctx)
     elif content == 'topmejores':
-        await topmejores_command(ctx)
+        await topmejores(ctx)
     else:
         await bot.process_commands(message)
 
@@ -544,8 +544,8 @@ async def on_message(message):
     
     # Verificar respuestas de trivia
     if message.channel.id in active_trivia:
-        trivia = active_trivia[message.channel.id]
-        user_attempts = trivia["attempts"].get(message.author.id, 0)
+        trivia_data = active_trivia[message.channel.id]
+        user_attempts = trivia_data["attempts"].get(message.author.id, 0)
         max_attempts_per_user = 3  # Número máximo de intentos por usuario
 
         if user_attempts >= max_attempts_per_user:
@@ -554,14 +554,14 @@ async def on_message(message):
             return
 
         normalized_answer = normalize_string(message.content)
-        if normalized_answer == trivia["answer"]:
+        if normalized_answer == trivia_data["answer"]:
             await message.channel.send(f"🎉 ¡Correcto, {message.author.mention}! Has acertado la trivia.")
             await asyncio.sleep(0.5)
             del active_trivia[message.channel.id]
             # Puedes agregar lógica para otorgar puntos aquí si lo deseas
         else:
-            trivia["attempts"][message.author.id] = user_attempts + 1
-            attempts_left = max_attempts_per_user - trivia["attempts"][message.author.id]
+            trivia_data["attempts"][message.author.id] = user_attempts + 1
+            attempts_left = max_attempts_per_user - trivia_data["attempts"][message.author.id]
             if attempts_left > 0:
                 await message.channel.send(f"❌ Respuesta incorrecta, {message.author.mention}. Te quedan {attempts_left} intentos.")
                 await asyncio.sleep(0.5)

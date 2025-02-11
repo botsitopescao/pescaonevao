@@ -67,7 +67,8 @@ def init_db():
             ADD COLUMN IF NOT EXISTS joke_text TEXT NOT NULL DEFAULT ''
         """)
         
-        # Tabla de trivias: se crea la tabla (si no existe) y se aseguran las columnas necesarias
+        # Tabla de trivias: se crea la tabla (si no existe) y se aseguran las columnas necesarias.
+        # Se reemplaza la columna 'hint' por dos columnas: 'hint1' y 'hint2'
         cur.execute("""
             CREATE TABLE IF NOT EXISTS trivias (
                 id SERIAL PRIMARY KEY
@@ -81,7 +82,6 @@ def init_db():
             ALTER TABLE trivias
             ADD COLUMN IF NOT EXISTS answer TEXT NOT NULL DEFAULT ''
         """)
-        # Se reemplaza la columna 'hint' por dos columnas: 'hint1' y 'hint2'
         cur.execute("""
             ALTER TABLE trivias
             ADD COLUMN IF NOT EXISTS hint1 TEXT
@@ -112,6 +112,12 @@ def init_db():
 init_db()
 
 ######################################
+# VARIABLES GLOBALES ADICIONALES
+######################################
+# Para el reenvío de mensajes DM según etapa (para campeón, etc.)
+dm_forwarding = {}  # Dict mapping user_id (str) to either None (indefinite) or a datetime (expiration time)
+
+######################################
 # CONFIGURACIÓN INICIAL DEL TORNEO
 ######################################
 PREFIX = '!'
@@ -129,7 +135,7 @@ stage_names = {
     8: "FIN"
 }
 
-# Variables para gestionar el reenvío de mensajes del campeón
+# Variables para gestionar el reenvío de mensajes del campeón (ya se usa dm_forwarding para DM forwarding ahora)
 champion_id = None
 forwarding_enabled = False
 forwarding_end_time = None
@@ -137,7 +143,7 @@ forwarding_end_time = None
 ######################################
 # VARIABLE GLOBAL PARA TRIVIA
 ######################################
-active_trivia = {}  # key: channel.id, value: {"question": ..., "answer": ..., "hint1": ..., "hint2": ...}
+active_trivia = {}  # key: channel.id, value: {"question": ..., "answer": ..., "hint1": ..., "hint2": ..., "attempts": {...}}
 
 # Variables globales para cache de chistes y trivias (para evitar repeticiones hasta agotar la lista)
 global_jokes_cache = []
@@ -209,7 +215,6 @@ def normalize_string(s):
 ######################################
 def get_random_joke():
     global global_jokes_cache
-    # Si la cache está vacía, cargar todos los chistes desde la base de datos.
     if not global_jokes_cache:
         with conn.cursor() as cur:
             cur.execute("SELECT joke_text FROM jokes")
@@ -238,7 +243,6 @@ def delete_all_jokes():
 
 def get_random_trivia():
     global global_trivias_cache
-    # Si la cache está vacía, cargar todas las trivias desde la base de datos.
     if not global_trivias_cache:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("SELECT * FROM trivias")
@@ -421,18 +425,30 @@ async def avanzar_etapa(ctx, etapa: int):
             upsert_participant(user_id, participant)
             await asyncio.sleep(0.1)
         await ctx.send(f"✅ Etapa actualizada a {etapa}. {limite_jugadores} jugadores han avanzado a esta etapa.")
-        # Solo enviar notificaciones si se avanza a una etapa superior
+        # Notificaciones solo si se asciende a una etapa superior
         if etapa > old_stage:
-            # Notificar a los jugadores que avanzaron
+            # Notificar a los que avanzaron en la etapa superior
             for user_id, participant in advanced:
                 user = bot.get_user(int(user_id))
                 if user is not None:
                     try:
-                        await user.send(f"🎉 ¡Felicidades! Has avanzado a la etapa {etapa}.")
+                        # Notificaciones especiales para etapas 6, 7 y 8
+                        if etapa == 6:
+                            msg = "🏆 ¡Felicidades! Eres el campeón del torneo y acabas de ganar 2800 paVos que se te entregarán en forma de regalos de la tienda de objetos de Fortnite, así que envíame los nombres de los objetos que quieres que te regale que sumen 2800 paVos."
+                            dm_forwarding[user_id] = None  # reenvío indefinido
+                        elif etapa == 7:
+                            msg = "🎁 Todavía te quedan objetos por escoger para completar tu premio de 2800 paVos."
+                            dm_forwarding[user_id] = None  # reenvío indefinido
+                        elif etapa == 8:
+                            msg = "🥇 Tus objetos han sido entregados campeón, muchas gracias por participar, has sido el mejor pescadito del torneo, nos vemos pronto."
+                            dm_forwarding[user_id] = datetime.datetime.utcnow() + datetime.timedelta(days=2)
+                        else:
+                            msg = f"🎉 ¡Felicidades! Has avanzado a la etapa {etapa}."
+                        await user.send(msg)
                     except Exception as e:
                         print(f"Error enviando DM a {user_id}: {e}")
-                await asyncio.sleep(1)
-            # Notificar a los jugadores que quedaron fuera (aquellos que siguen en la etapa antigua)
+                    await asyncio.sleep(1)
+            # Notificar a los que quedaron fuera (mantienen la etapa antigua)
             for user_id, participant in data["participants"].items():
                 if participant.get("etapa", old_stage) == old_stage and user_id not in [uid for uid, _ in advanced]:
                     user = bot.get_user(int(user_id))
@@ -576,33 +592,40 @@ async def on_message_no_prefix(message):
         await bot.process_commands(message)
 
 ######################################
-# EVENTO ON_MESSAGE
+# EVENTO ON_MESSAGE (DM FORWARDING Y TRIVIA RESPUESTAS)
 ######################################
 @bot.event
 async def on_message(message):
     if message.author.bot:
         return
-    global forwarding_enabled
-    if message.guild is None and champion_id is not None and message.author.id == champion_id and forwarding_enabled:
-        if forwarding_end_time is not None and datetime.datetime.utcnow() > forwarding_end_time:
-            forwarding_enabled = False
-        else:
-            try:
-                forward_channel = bot.get_channel(1338610365327474690)
-                if forward_channel:
-                    await forward_channel.send(f"**Mensaje del Campeón:** {message.content}")
+
+    # DM forwarding: si el mensaje se envía por DM y el autor está en dm_forwarding, reenvía al canal SPECIAL_HELP_CHANNEL.
+    if message.guild is None:
+        if message.author.id in dm_forwarding:
+            end_time = dm_forwarding[message.author.id]
+            if end_time is not None and datetime.datetime.utcnow() > end_time:
+                del dm_forwarding[message.author.id]
+            else:
+                forward_channel = bot.get_channel(SPECIAL_HELP_CHANNEL)
+                if forward_channel is not None:
+                    forward_text = f"Mensaje de {message.author.mention}: {message.content}"
+                    if message.attachments:
+                        for attachment in message.attachments:
+                            forward_text += f"\nAdjunto: {attachment.url}"
+                    try:
+                        await forward_channel.send(forward_text)
+                    except Exception as e:
+                        print(f"Error forwarding DM from {message.author.id}: {e}")
                     await asyncio.sleep(1)
-            except Exception as e:
-                print(f"Error forwarding message: {e}")
     await bot.process_commands(message)
     
+    # Procesamiento de respuestas de trivia
     if message.channel.id in active_trivia:
         trivia_data = active_trivia[message.channel.id]
         user_attempts = trivia_data["attempts"].get(message.author.id, 0)
         max_attempts_per_user = 3
 
         if user_attempts >= max_attempts_per_user:
-            # Enviar la notificación de agotamiento de intentos una sola vez.
             if user_attempts == max_attempts_per_user:
                 await message.channel.send(f"🚫 {message.author.mention}, has alcanzado el número máximo de intentos para esta trivia.")
                 trivia_data["attempts"][message.author.id] = max_attempts_per_user + 1

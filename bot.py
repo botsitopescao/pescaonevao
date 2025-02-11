@@ -2,6 +2,7 @@ import discord
 import psycopg2
 import psycopg2.extras
 from discord.ext import commands
+from discord.ext.commands import cooldown, BucketType
 import json
 import random
 import os
@@ -17,10 +18,10 @@ from zoneinfo import ZoneInfo
 # CONFIGURACIÓN: IDs y Servidor
 ######################################
 OWNER_ID = 1336609089656197171         # Tu Discord ID (único autorizado para comandos sensibles)
-#PRIVATE_CHANNEL_ID = 1338130641354620988  # Canal privado para comandos sensibles (no se utiliza en la versión final)
-PUBLIC_CHANNEL_ID  = 1338126297666424874  # Canal público donde se muestran resultados sensibles PUNTUACION CHANNEL
-SPECIAL_HELP_CHANNEL = 1338747286901100554  # Canal especial para comandos pro COMANDOS PRO CHANNEL
-GUILD_ID = 1337387112403697694            # REEMPLAZA con el ID real de tu servidor (guild)
+PRIVATE_CHANNEL_ID = 1338130641354620988  # Canal privado para comandos sensibles (no se utiliza en la versión final)
+PUBLIC_CHANNEL_ID  = 1338126297666424874  # Canal público donde se muestran resultados sensibles
+SPECIAL_HELP_CHANNEL = 1338747286901100554  # Canal especial para comandos pro
+GUILD_ID = 123456789012345678            # REEMPLAZA con el ID real de tu servidor (guild)
 
 API_SECRET = os.environ.get("API_SECRET")  # Para la API privada (opcional)
 
@@ -33,7 +34,7 @@ conn.autocommit = True
 
 def init_db():
     with conn.cursor() as cur:
-        # Tabla de registros (modificada)
+        # Tabla de registros
         cur.execute("""
             CREATE TABLE IF NOT EXISTS registrations (
                 user_id TEXT PRIMARY KEY,
@@ -90,7 +91,7 @@ stage_names = {
     3: "Boxfight duos",
     4: "Pescadito dice",
     5: "Gran Final",
-    6: "CAMPEON",
+    6: "CAMPEÓN",
     7: "FALTA ESCOGER OBJETOS",
     8: "FIN"
 }
@@ -167,34 +168,48 @@ def normalize_string(s):
     return ''.join(c for c in unicodedata.normalize('NFKD', s) if not unicodedata.combining(c)).replace(" ", "").lower()
 
 ######################################
-# LISTAS DE CHISTES Y TRIVIAS (sin cambios)
+# FUNCIONES DE CHISTES Y TRIVIAS
 ######################################
-ALL_JOKES = [
-    "¿Por qué los programadores confunden Halloween y Navidad? Porque OCT 31 == DEC 25.",
-]
-unused_jokes = ALL_JOKES.copy()
-
 def get_random_joke():
-    global unused_jokes, ALL_JOKES
-    if not unused_jokes:
-        unused_jokes = ALL_JOKES.copy()
-    joke = random.choice(unused_jokes)
-    unused_jokes.remove(joke)
-    return joke
+    with conn.cursor() as cur:
+        cur.execute("SELECT content FROM jokes ORDER BY RANDOM() LIMIT 1")
+        result = cur.fetchone()
+        if result:
+            return result[0]
+        else:
+            return "No tengo chistes para contar ahora mismo."
 
-ALL_TRIVIA = [
-    {"question": "¿Quién escribió 'Cien Años de Soledad'?", "answer": "gabriel garcía márquez", "hint": "Comienza con 'Gabriel'."},
-    {"question": "¿Cuál es el río más largo del mundo?", "answer": "amazonas", "hint": "Comienza con 'A'."},
-]
-unused_trivia = ALL_TRIVIA.copy()
+def add_jokes_bulk(jokes_list):
+    with conn.cursor() as cur:
+        for joke in jokes_list:
+            cur.execute("INSERT INTO jokes (content) VALUES (%s)", (joke,))
+            asyncio.sleep(0.1)  # Delay para evitar múltiples solicitudes seguidas
+
+def delete_all_jokes():
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM jokes")
 
 def get_random_trivia():
-    global unused_trivia, ALL_TRIVIA
-    if not unused_trivia:
-        unused_trivia = ALL_TRIVIA.copy()
-    trivia = random.choice(unused_trivia)
-    unused_trivia.remove(trivia)
-    return trivia
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute("SELECT * FROM trivias ORDER BY RANDOM() LIMIT 1")
+        result = cur.fetchone()
+        if result:
+            return {"question": result["question"], "answer": result["answer"], "hint": result.get("hint", "")}
+        else:
+            return None
+
+def add_trivias_bulk(trivias_list):
+    with conn.cursor() as cur:
+        for trivia in trivias_list:
+            question = trivia.get("question")
+            answer = trivia.get("answer")
+            hint = trivia.get("hint", "")
+            cur.execute("INSERT INTO trivias (question, answer, hint) VALUES (%s, %s, %s)", (question, answer, hint))
+            asyncio.sleep(0.1)  # Delay para evitar múltiples solicitudes seguidas
+
+def delete_all_trivias():
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM trivias")
 
 ######################################
 # INICIALIZACIÓN DEL BOT
@@ -340,8 +355,50 @@ async def avanzar_etapa(ctx, etapa: int):
         await ctx.send(f"❌ La etapa {etapa} no está definida en STAGES.")
         await asyncio.sleep(1)
 
-# Otros comandos Pro relacionados con eventos y registros...
-# Aquí irían los demás comandos Pro marcados como # Comandos Pro
+@bot.command()
+async def agregar_chistes_masivos(ctx, *, chistes_texto: str):
+    if not is_owner_and_allowed(ctx):
+        return
+    chistes_lista = [chiste.strip() for chiste in chistes_texto.strip().split('\n') if chiste.strip()]
+    if len(chistes_lista) > 0:
+        add_jokes_bulk(chistes_lista)
+        await ctx.send(f"✅ Se han agregado {len(chistes_lista)} chistes a la base de datos.")
+    else:
+        await ctx.send("❌ No se encontraron chistes para agregar.")
+    await asyncio.sleep(1)
+
+@bot.command()
+async def agregar_trivias_masivas(ctx, *, trivias_json: str):
+    if not is_owner_and_allowed(ctx):
+        return
+    try:
+        trivias_lista = json.loads(trivias_json)
+        if isinstance(trivias_lista, list):
+            add_trivias_bulk(trivias_lista)
+            await ctx.send(f"✅ Se han agregado {len(trivias_lista)} trivias a la base de datos.")
+        else:
+            await ctx.send("❌ El formato de las trivias es incorrecto. Debe ser una lista de objetos.")
+    except json.JSONDecodeError:
+        await ctx.send("❌ Error al procesar el JSON. Asegúrate de que el formato sea correcto.")
+    await asyncio.sleep(1)
+
+@bot.command()
+async def eliminar_todos_chistes(ctx):
+    if not is_owner_and_allowed(ctx):
+        return
+    delete_all_jokes()
+    await ctx.send("✅ Se han eliminado todos los chistes de la base de datos.")
+    await asyncio.sleep(1)
+
+@bot.command()
+async def eliminar_todas_trivias(ctx):
+    if not is_owner_and_allowed(ctx):
+        return
+    delete_all_trivias()
+    await ctx.send("✅ Se han eliminado todas las trivias de la base de datos.")
+    await asyncio.sleep(1)
+
+# Otros comandos Pro...
 
 ######################################
 # COMANDOS COMUNES (DISPONIBLES PARA TODOS)
@@ -349,16 +406,61 @@ async def avanzar_etapa(ctx, etapa: int):
 # Comandos Comunes
 
 @bot.command()
+@cooldown(1, 10, BucketType.user)  # Cooldown de 10 segundos por usuario
 async def trivia_command(ctx):
+    if ctx.author.bot:
+        return
     if ctx.channel.id in active_trivia:
         del active_trivia[ctx.channel.id]
     trivia_item = get_random_trivia()
-    active_trivia[ctx.channel.id] = trivia_item
-    await ctx.send(f"**Trivia:** {trivia_item['question']}\n_Responde en el chat._")
+    if trivia_item:
+        active_trivia[ctx.channel.id] = trivia_item
+        await ctx.send(f"**Trivia:** {trivia_item['question']}\n_Responde en el chat._")
+    else:
+        await ctx.send("No tengo más trivias disponibles en este momento.")
 
 @bot.command()
+@cooldown(1, 10, BucketType.user)  # Cooldown de 10 segundos por usuario
 async def chiste_command(ctx):
-    await ctx.send(get_random_joke())
+    if ctx.author.bot:
+        return
+    joke = get_random_joke()
+    await ctx.send(joke)
+
+@bot.command()
+@cooldown(1, 10, BucketType.user)  # Cooldown de 10 segundos por usuario
+async def ranking_command(ctx):
+    if ctx.author.bot:
+        return
+    user_id = str(ctx.author.id)
+    participant = get_participant(user_id)
+    if participant:
+        puntos = participant.get("puntuacion", 0)
+        await ctx.send(f"🌟 {ctx.author.display_name}, tienes **{puntos} puntos** en el torneo.")
+    else:
+        await ctx.send("❌ No estás registrado en el torneo.")
+
+@bot.command()
+@cooldown(1, 10, BucketType.user)  # Cooldown de 10 segundos por usuario
+async def topmejores_command(ctx):
+    if ctx.author.bot:
+        return
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute("""
+            SELECT fortnite_username, puntuacion
+            FROM registrations
+            ORDER BY puntuacion DESC
+            LIMIT 10
+        """)
+        top_players = cur.fetchall()
+    if top_players:
+        lines = ["🏆 **Top 10 Mejores del Torneo:**"]
+        for idx, player in enumerate(top_players, start=1):
+            lines.append(f"{idx}. {player['fortnite_username']} - {player['puntuacion']} puntos")
+        message = "\n".join(lines)
+        await ctx.send(message)
+    else:
+        await ctx.send("No hay participantes en el torneo.")
 
 # Habilitar comandos sin prefijo '!'
 @bot.listen('on_message')
@@ -373,15 +475,21 @@ async def on_message_no_prefix(message):
         await trivia_command(ctx)
     elif content == 'chiste':
         await chiste_command(ctx)
+    elif content == 'ranking':
+        await ranking_command(ctx)
+    elif content == 'topmejores':
+        await topmejores_command(ctx)
     # Agrega aquí otros comandos comunes sin prefijo
     else:
         await bot.process_commands(message)
 
 ######################################
-# EVENTO ON_MESSAGE: Reenvío de DMs del campeón
+# EVENTO ON_MESSAGE
 ######################################
 @bot.event
 async def on_message(message):
+    if message.author.bot:
+        return  # Previene bucles infinitos
     global forwarding_enabled
     if message.guild is None and champion_id is not None and message.author.id == champion_id and forwarding_enabled:
         if forwarding_end_time is not None and datetime.datetime.utcnow() > forwarding_end_time:
@@ -395,7 +503,17 @@ async def on_message(message):
             except Exception as e:
                 print(f"Error forwarding message: {e}")
     # El resto de la lógica se maneja en on_message_no_prefix
-    # await bot.process_commands(message)
+    await bot.process_commands(message)
+
+######################################
+# EVENTO ON_COMMAND_ERROR
+######################################
+@bot.event
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.CommandOnCooldown):
+        await ctx.send(f"⏳ Este comando está en cooldown. Por favor, inténtalo de nuevo en {round(error.retry_after, 1)} segundos.")
+    else:
+        raise error
 
 ######################################
 # EVENTO ON_READY

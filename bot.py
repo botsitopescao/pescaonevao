@@ -15,39 +15,14 @@ from flask import Flask, request, jsonify
 from zoneinfo import ZoneInfo
 import urllib.parse  # para parsear la URL de la base de datos
 
-# Mapeo de países a zonas horarias
-country_timezones = {
-    "Argentina": "America/Argentina/Buenos_Aires",
-    "Bolivia": "America/La_Paz",
-    "Chile": "America/Santiago",
-    "Colombia": "America/Bogota",
-    "Costa Rica": "America/Costa_Rica",
-    "Cuba": "America/Havana",
-    "Ecuador": "America/Guayaquil",
-    "El Salvador": "America/El_Salvador",
-    "España": "Europe/Madrid",
-    "Guatemala": "America/Guatemala",
-    "Honduras": "America/Tegucigalpa",
-    "México": "America/Mexico_City",
-    "Nicaragua": "America/Managua",
-    "Panamá": "America/Panama",
-    "Paraguay": "America/Asuncion",
-    "Perú": "America/Lima",
-    "Puerto Rico": "America/Puerto_Rico",
-    "República Dominicana": "America/Santo_Domingo",
-    "Uruguay": "America/Montevideo",
-    "Venezuela": "America/Caracas",
-    "Guinea Ecuatorial": "Africa/Malabo"
-}
-
 ######################################
 # CONFIGURACIÓN: IDs y Servidor
 ######################################
 OWNER_ID = 1336609089656197171         # Tu Discord ID (único autorizado para comandos sensibles)
-#PRIVATE_CHANNEL_ID = 1338130641354620988
-PUBLIC_CHANNEL_ID  = 1338126297666424874
-SPECIAL_HELP_CHANNEL = 1338747286901100554
-GUILD_ID = 1337387112403697694
+#PRIVATE_CHANNEL_ID = 1338130641354620988  # Canal privado para comandos sensibles (no se utiliza en la versión final)
+PUBLIC_CHANNEL_ID  = 1338126297666424874  # Canal público donde se muestran resultados sensibles PUNTUACION CHANNEL
+SPECIAL_HELP_CHANNEL = 1338747286901100554  # Canal especial para comandos pro COMANDOS PRO CHANNEL
+GUILD_ID = 1337387112403697694            # REEMPLAZA con el ID real de tu servidor (guild)
 
 API_SECRET = os.environ.get("API_SECRET")  # Para la API privada (opcional)
 
@@ -55,6 +30,7 @@ API_SECRET = os.environ.get("API_SECRET")  # Para la API privada (opcional)
 # CONEXIÓN A LA BASE DE DATOS POSTGRESQL
 ######################################
 DATABASE_URL = os.environ.get("DATABASE_URL")
+
 conn = psycopg2.connect(DATABASE_URL)
 conn.autocommit = True
 
@@ -72,6 +48,7 @@ def init_db():
                 etapa INTEGER DEFAULT 1
             )
         """)
+        # Asegurarse de que la tabla 'registrations' tenga todas las columnas necesarias
         cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS discord_name TEXT")
         cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS fortnite_username TEXT")
         cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS platform TEXT")
@@ -79,7 +56,7 @@ def init_db():
         cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS puntuacion INTEGER DEFAULT 0")
         cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS etapa INTEGER DEFAULT 1")
         
-        # Tabla de chistes
+        # Tabla de chistes: se crea la tabla (si no existe) y se asegura que exista la columna "joke_text"
         cur.execute("""
             CREATE TABLE IF NOT EXISTS jokes (
                 id SERIAL PRIMARY KEY
@@ -90,7 +67,8 @@ def init_db():
             ADD COLUMN IF NOT EXISTS joke_text TEXT NOT NULL DEFAULT ''
         """)
         
-        # Tabla de trivias (dos pistas)
+        # Tabla de trivias: se crea la tabla (si no existe) y se aseguran las columnas necesarias.
+        # Se reemplaza la columna 'hint' por dos columnas: 'hint1' y 'hint2'
         cur.execute("""
             CREATE TABLE IF NOT EXISTS trivias (
                 id SERIAL PRIMARY KEY
@@ -121,37 +99,32 @@ def init_db():
             )
         """)
         
-        # Tabla de eventos del calendario, en zona horaria de Perú.
-        # Nota: Se incluye la columna "event_time" obligatoria y se inserta el mismo valor en event_time y event_datetime.
+        # Tabla de eventos del calendario
         cur.execute("""
             CREATE TABLE IF NOT EXISTS calendar_events (
                 id SERIAL PRIMARY KEY,
-                event_time TIMESTAMP WITH TIME ZONE NOT NULL,
-                event_datetime TIMESTAMP WITH TIME ZONE NOT NULL,
                 name TEXT NOT NULL,
+                event_datetime TIMESTAMP WITH TIME ZONE NOT NULL,
                 target_stage INTEGER NOT NULL,
-                notified_10h BOOLEAN DEFAULT FALSE,
-                notified_2h BOOLEAN DEFAULT FALSE
+                initial_notified BOOLEAN DEFAULT FALSE
             )
         """)
-        cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS event_time TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()")
-        cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS event_datetime TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()")
-        cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS name TEXT NOT NULL DEFAULT ''")
-        cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS target_stage INTEGER NOT NULL DEFAULT 0")
-        cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS notified_10h BOOLEAN DEFAULT FALSE")
+        # Agregar columnas para notificaciones de eventos
+        cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS notified_2d BOOLEAN DEFAULT FALSE")
         cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS notified_2h BOOLEAN DEFAULT FALSE")
 init_db()
 
 ######################################
 # VARIABLES GLOBALES ADICIONALES
 ######################################
-# Para el reenvío de mensajes DM en condiciones especiales (etapas 6, 7, 8)
-dm_forwarding = {}  # Diccionario: user_id (str) -> None (reenvío indefinido) o datetime (fecha de expiración)
+# Para el reenvío de mensajes DM según etapa especial (campeón, etc.)
+dm_forwarding = {}  # Diccionario que mapea user_id (str) a None (indefinido) o a un datetime de expiración
 
 ######################################
 # CONFIGURACIÓN INICIAL DEL TORNEO
 ######################################
 PREFIX = '!'
+# Configuración de etapas
 STAGES = {1: 60, 2: 48, 3: 32, 4: 24, 5: 14, 6: 1, 7: 1, 8: 1}
 current_stage = 1
 stage_names = {
@@ -165,6 +138,7 @@ stage_names = {
     8: "FIN"
 }
 
+# Variables para gestionar el reenvío de mensajes del campeón (se usa dm_forwarding para DM forwarding)
 champion_id = None
 forwarding_enabled = False
 forwarding_end_time = None
@@ -172,9 +146,9 @@ forwarding_end_time = None
 ######################################
 # VARIABLE GLOBAL PARA TRIVIA
 ######################################
-active_trivia = {}  # Diccionario: channel.id -> {"question": ..., "answer": ..., "hint1": ..., "hint2": ..., "attempts": {...}}
+active_trivia = {}  # key: channel.id, value: {"question": ..., "answer": ..., "hint1": ..., "hint2": ..., "attempts": {...}}
 
-# Caches para chistes y trivias
+# Variables globales para cache de chistes y trivias (para evitar repeticiones hasta agotar la lista)
 global_jokes_cache = []
 global_trivias_cache = []
 
@@ -273,7 +247,7 @@ def delete_all_jokes():
 def get_random_trivia():
     global global_trivias_cache
     if not global_trivias_cache:
-        with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("SELECT * FROM trivias")
             rows = cur.fetchall()
             global_trivias_cache = rows
@@ -437,35 +411,23 @@ async def borrar_usuario(ctx, user_id: str):
     await ctx.send(f"✅ Se ha eliminado el usuario con ID {user_id} del registro.")
     await asyncio.sleep(1)
 
-# Comandos de eventos (SOLO OWNER_ID)
+# Comandos de eventos
 @bot.command()
-async def agregar_evento(ctx, *, args: str):
+async def agregar_evento(ctx, date: str, time: str, *, event_name: str):
     if not is_owner_and_allowed(ctx):
         return
-    # Formato esperado: "dd/mm/aaaa | hh:mm | Nombre del evento"
-    parts = args.split("|")
-    if len(parts) != 3:
-        await ctx.send("❌ Formato incorrecto. Utiliza: !agregar_evento dd/mm/aaaa | hh:mm | Nombre del evento")
-        return
-    date_str = parts[0].strip()
-    time_str = parts[1].strip()
-    event_name = parts[2].strip()
-    dt_str = f"{date_str} {time_str}"
+    dt_str = f"{date} {time}"
     try:
         event_dt = datetime.datetime.strptime(dt_str, "%d/%m/%Y %H:%M")
-        event_dt = event_dt.replace(tzinfo=ZoneInfo("America/Lima"))
+        event_dt = event_dt.replace(tzinfo=datetime.timezone.utc)
     except Exception as e:
-        await ctx.send("❌ Formato de fecha u hora incorrecto. Utiliza: dd/mm/aaaa | hh:mm")
+        await ctx.send("❌ Formato de fecha u hora incorrecto. Usa dd/mm/aaaa hh:mm")
         return
     target_stage = current_stage
-    # Insertar en event_time y event_datetime con el mismo valor.
     with conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO calendar_events (event_time, event_datetime, name, target_stage, notified_10h, notified_2h) VALUES (%s, %s, %s, %s, FALSE, FALSE)",
-            (event_dt, event_dt, event_name, target_stage)
-        )
+        cur.execute("INSERT INTO calendar_events (name, event_datetime, target_stage, notified_2d, notified_2h) VALUES (%s, %s, %s, FALSE, FALSE)", (event_name, event_dt, target_stage))
     await ctx.send(f"✅ Evento '{event_name}' agregado para el {dt_str} (Etapa {target_stage}).")
-
+    
 @bot.command()
 async def ver_eventos(ctx):
     if not is_owner_and_allowed(ctx):
@@ -507,9 +469,11 @@ async def avanzar_etapa(ctx, etapa: int):
         for user_id, participant in advanced:
             participant["etapa"] = etapa
             upsert_participant(user_id, participant)
-            await asyncio.sleep(1)  # Delay para evitar sobrecarga
+            await asyncio.sleep(0.1)
         await ctx.send(f"✅ Etapa actualizada a {etapa}. {limite_jugadores} jugadores han avanzado a esta etapa.")
+        # Notificaciones solo si se asciende a una etapa superior
         if etapa > old_stage:
+            # Notificar a los jugadores que avanzaron
             for user_id, participant in advanced:
                 user = bot.get_user(int(user_id))
                 if user is not None:
@@ -529,6 +493,7 @@ async def avanzar_etapa(ctx, etapa: int):
                     except Exception as e:
                         print(f"Error enviando DM a {user_id}: {e}")
                     await asyncio.sleep(1)
+            # Notificar a los jugadores que quedaron fuera (aquellos que permanecen en la etapa antigua)
             for user_id, participant in data["participants"].items():
                 if participant.get("etapa", old_stage) == old_stage and user_id not in [uid for uid, _ in advanced]:
                     user = bot.get_user(int(user_id))
@@ -587,36 +552,144 @@ async def eliminar_todas_trivias(ctx):
     await asyncio.sleep(1)
 
 ######################################
-# EVENTO ON_MESSAGE ÚNICO
+# COMANDOS DE EVENTOS (SOLO OWNER_ID)
+######################################
+@bot.command()
+async def agregar_evento(ctx, date: str, time: str, *, event_name: str):
+    if not is_owner_and_allowed(ctx):
+        return
+    dt_str = f"{date} {time}"
+    try:
+        event_dt = datetime.datetime.strptime(dt_str, "%d/%m/%Y %H:%M")
+        event_dt = event_dt.replace(tzinfo=datetime.timezone.utc)
+    except Exception as e:
+        await ctx.send("❌ Formato de fecha u hora incorrecto. Usa dd/mm/aaaa hh:mm")
+        return
+    target_stage = current_stage
+    with conn.cursor() as cur:
+        cur.execute("INSERT INTO calendar_events (name, event_datetime, target_stage, notified_2d, notified_2h) VALUES (%s, %s, %s, FALSE, FALSE)", (event_name, event_dt, target_stage))
+    await ctx.send(f"✅ Evento '{event_name}' agregado para el {dt_str} (Etapa {target_stage}).")
+
+@bot.command()
+async def ver_eventos(ctx):
+    if not is_owner_and_allowed(ctx):
+        return
+    with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+        cur.execute("SELECT id, name, event_datetime, target_stage FROM calendar_events ORDER BY event_datetime")
+        events = cur.fetchall()
+    if events:
+        lines = ["**Eventos en el Calendario:**"]
+        for ev in events:
+            dt = ev["event_datetime"]
+            date_str = dt.strftime("%d/%m/%Y")
+            time_str = dt.strftime("%H:%M")
+            lines.append(f"ID: {ev['id']} - {date_str} {time_str} - {ev['name']} (Etapa {ev['target_stage']})")
+        await ctx.send("\n".join(lines))
+    else:
+        await ctx.send("No hay eventos en el calendario.")
+
+@bot.command()
+async def borrar_evento(ctx, event_id: int):
+    if not is_owner_and_allowed(ctx):
+        return
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM calendar_events WHERE id = %s", (event_id,))
+    await ctx.send(f"✅ Evento con ID {event_id} borrado del calendario.")
+
+######################################
+# COMANDOS COMUNES (DISPONIBLES PARA TODOS)
+######################################
+@bot.command()
+@cooldown(1, 10, BucketType.user)
+async def trivia(ctx):
+    if ctx.author.bot:
+        return
+    if ctx.channel.id in active_trivia:
+        del active_trivia[ctx.channel.id]
+    trivia_item = get_random_trivia()
+    if trivia_item:
+        active_trivia[ctx.channel.id] = {
+            "question": trivia_item["question"],
+            "answer": normalize_string(trivia_item["answer"]),
+            "hint1": trivia_item.get("hint1", ""),
+            "hint2": trivia_item.get("hint2", ""),
+            "attempts": {}
+        }
+        await ctx.send(f"**Trivia:** {trivia_item['question']}\n_Responde en el chat._")
+    else:
+        await ctx.send("No tengo más trivias disponibles en este momento.")
+
+@bot.command()
+@cooldown(1, 10, BucketType.user)
+async def chiste(ctx):
+    if ctx.author.bot:
+        return
+    joke = get_random_joke()
+    await ctx.send(joke)
+
+@bot.command()
+@cooldown(1, 10, BucketType.user)
+async def ranking(ctx):
+    if ctx.author.bot:
+        return
+    user_id = str(ctx.author.id)
+    participant = get_participant(user_id)
+    if participant:
+        puntos = participant.get("puntuacion", 0)
+        await ctx.send(f"🌟 {ctx.author.display_name}, tienes **{puntos} puntos** en el torneo.")
+    else:
+        await ctx.send("❌ No estás registrado en el torneo.")
+
+@bot.command()
+@cooldown(1, 10, BucketType.user)
+async def topmejores(ctx):
+    if ctx.author.bot:
+        return
+    with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+        cur.execute("""
+            SELECT fortnite_username, puntuacion
+            FROM registrations
+            ORDER BY puntuacion DESC
+            LIMIT 10
+        """)
+        top_players = cur.fetchall()
+    if top_players:
+        lines = ["🏆 **Top 10 Mejores del Torneo:**"]
+        for idx, player in enumerate(top_players, start=1):
+            lines.append(f"{idx}. {player['fortnite_username']} - {player['puntuacion']} puntos")
+        message = "\n".join(lines)
+        await ctx.send(message)
+    else:
+        await ctx.send("No hay participantes en el torneo.")
+
+@bot.listen('on_message')
+async def on_message_no_prefix(message):
+    if message.author.bot:
+        return
+    content = message.content.lower().strip()
+    ctx = await bot.get_context(message)
+    if ctx.valid:
+        return
+    if content == 'trivia':
+        await trivia(ctx)
+    elif content == 'chiste':
+        await chiste(ctx)
+    elif content == 'ranking':
+        await ranking(ctx)
+    elif content == 'topmejores':
+        await topmejores(ctx)
+    else:
+        await bot.process_commands(message)
+
+######################################
+# EVENTO ON_MESSAGE (DM FORWARDING Y TRIVIA RESPUESTAS)
 ######################################
 @bot.event
 async def on_message(message):
     if message.author.bot:
         return
 
-    # Si el mensaje no comienza con el prefijo, y es uno de los comandos sin prefijo, invócalos.
-    if not message.content.startswith(PREFIX):
-        content = message.content.lower().strip()
-        if content == "trivia":
-            ctx = await bot.get_context(message)
-            await trivia(ctx)
-            return
-        elif content == "chiste":
-            ctx = await bot.get_context(message)
-            await chiste(ctx)
-            return
-        elif content == "ranking":
-            ctx = await bot.get_context(message)
-            await ranking(ctx)
-            return
-        elif content == "topmejores":
-            ctx = await bot.get_context(message)
-            await topmejores(ctx)
-            return
-
-    await bot.process_commands(message)
-
-    # Si el mensaje es un DM y el usuario está en dm_forwarding, reenvía al canal SPECIAL_HELP_CHANNEL.
+    # DM forwarding: si el mensaje se envía por DM y el autor está en dm_forwarding, reenviar al canal SPECIAL_HELP_CHANNEL.
     if message.guild is None:
         if message.author.id in dm_forwarding:
             end_time = dm_forwarding[message.author.id]
@@ -634,15 +707,16 @@ async def on_message(message):
                     except Exception as e:
                         print(f"Error forwarding DM from {message.author.id}: {e}")
                     await asyncio.sleep(1)
-
-    # Procesamiento de respuestas de trivia (solo en canales, no en DM)
-    if message.guild is not None and message.channel.id in active_trivia:
+    await bot.process_commands(message)
+    
+    # Procesamiento de respuestas de trivia
+    if message.channel.id in active_trivia:
         trivia_data = active_trivia[message.channel.id]
         user_attempts = trivia_data["attempts"].get(message.author.id, 0)
         max_attempts_per_user = 3
         if user_attempts >= max_attempts_per_user:
             if user_attempts == max_attempts_per_user:
-                await message.channel.send(f"❌ Has agotado tus intentos, {message.author.mention}.")
+                await message.channel.send(f"🚫 {message.author.mention}, has alcanzado el número máximo de intentos para esta trivia.")
                 trivia_data["attempts"][message.author.id] = max_attempts_per_user + 1
             return
         normalized_answer = normalize_string(message.content)
@@ -653,12 +727,11 @@ async def on_message(message):
         else:
             trivia_data["attempts"][message.author.id] = user_attempts + 1
             attempts_left = max_attempts_per_user - trivia_data["attempts"][message.author.id]
+            hint_message = ""
             if attempts_left == 2:
                 hint_message = f" Pista: {trivia_data.get('hint1', '')}"
             elif attempts_left == 1:
                 hint_message = f" Pista: {trivia_data.get('hint2', '')}"
-            else:
-                hint_message = ""
             if attempts_left > 0:
                 await message.channel.send(f"❌ Respuesta incorrecta, {message.author.mention}. Te quedan {attempts_left} intentos.{hint_message}")
                 await asyncio.sleep(0.5)
@@ -686,63 +759,41 @@ async def on_ready():
 
 async def event_notifier():
     await bot.wait_until_ready()
-    tz_peru = ZoneInfo("America/Lima")
     while not bot.is_closed():
-        now = datetime.datetime.now(tz_peru)
+        now = datetime.datetime.now(datetime.timezone.utc)
         with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-            cur.execute("SELECT id, name, event_datetime, target_stage, notified_10h, notified_2h FROM calendar_events ORDER BY event_datetime")
+            cur.execute("SELECT id, name, event_datetime, target_stage, notified_2d, notified_2h FROM calendar_events")
             events = cur.fetchall()
         for ev in events:
             event_dt = ev["event_datetime"]
-            diff = (event_dt - now).total_seconds()
-            # Notificar 10 horas antes
-            if diff > 0 and diff <= 10 * 3600 and not ev["notified_10h"]:
+            diff = event_dt - now
+            # Notificar 2 días antes
+            if diff.total_seconds() > 0 and diff.total_seconds() <= 2 * 24 * 3600 and not ev["notified_2d"]:
                 with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-                    cur.execute("SELECT user_id, country FROM registrations WHERE etapa = %s", (ev["target_stage"],))
+                    cur.execute("SELECT user_id FROM registrations WHERE etapa = %s", (ev["target_stage"],))
                     users = cur.fetchall()
                 for user_row in users:
                     user = bot.get_user(int(user_row["user_id"]))
                     if user is not None:
-                        tz_user = ZoneInfo(country_timezones.get(user_row["country"], "UTC"))
-                        local_dt = event_dt.astimezone(tz_user)
-                        msg = (f"⏰ Faltan 10 horas para '{ev['name']}', que se realizará el "
-                               f"{local_dt.strftime('%d/%m/%Y %H:%M')} hora {user_row['country']}. Recuerda que si llegas tarde, quedarás automáticamente eliminado del torneo así tengas puntaje alto.")
                         try:
-                            await user.send(msg)
+                            await user.send(f"⏰ Faltan 2 días para el evento '{ev['name']}' programado para {event_dt.strftime('%d/%m/%Y %H:%M')}. ¡No te lo pierdas! 🎉")
                         except Exception as e:
-                            print(f"Error enviando DM de 10 horas a {user_row['user_id']}: {e}")
+                            print(f"Error enviando DM de 2 días a {user_row['user_id']}: {e}")
                         await asyncio.sleep(1)
                 with conn.cursor() as cur:
-                    cur.execute("UPDATE calendar_events SET notified_10h = TRUE WHERE id = %s", (ev["id"],))
+                    cur.execute("UPDATE calendar_events SET notified_2d = TRUE WHERE id = %s", (ev["id"],))
             # Notificar 2 horas antes
-            if diff > 0 and diff <= 2 * 3600 and not ev["notified_2h"]:
+            if diff.total_seconds() > 0 and diff.total_seconds() <= 2 * 3600 and not ev["notified_2h"]:
                 with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-                    cur.execute("SELECT user_id, country FROM registrations WHERE etapa = %s", (ev["target_stage"],))
+                    cur.execute("SELECT user_id FROM registrations WHERE etapa = %s", (ev["target_stage"],))
                     users = cur.fetchall()
                 for user_row in users:
                     user = bot.get_user(int(user_row["user_id"]))
                     if user is not None:
-                        tz_user = ZoneInfo(country_timezones.get(user_row["country"], "UTC"))
-                        local_dt = event_dt.astimezone(tz_user)
-                        msg = (f"⏰ Faltan 2 horas para '{ev['name']}', que se realizará el "
-                               f"{local_dt.strftime('%d/%m/%Y %H:%M')} hora {user_row['country']}. Recuerda que si llegas tarde, quedarás automáticamente eliminado del torneo así tengas puntaje alto.")
                         try:
-                            await user.send(msg)
+                            await user.send(f"⏰ Faltan 2 horas para el evento '{ev['name']}' programado para {event_dt.strftime('%d/%m/%Y %H:%M')}. ¡Prepárate! 🎊")
                         except Exception as e:
                             print(f"Error enviando DM de 2 horas a {user_row['user_id']}: {e}")
                         await asyncio.sleep(1)
                 with conn.cursor() as cur:
-                    cur.execute("UPDATE calendar_events SET notified_2h = TRUE WHERE id = %s", (ev["id"],))
-        await asyncio.sleep(60)
-
-######################################
-# SERVIDOR WEB PARA MANTENER EL BOT ACTIVO (API PRIVADA)
-######################################
-def run_flask():
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
-
-if __name__ == '__main__':
-    flask_thread = threading.Thread(target=run_flask)
-    flask_thread.start()
-    bot.run(os.getenv('DISCORD_TOKEN'))
+                    cur.execute("UPDATE calendar_events SET notified_2h = 

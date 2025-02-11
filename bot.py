@@ -251,7 +251,7 @@ async def send_public_message(message: str, view: discord.ui.View = None):
     if public_channel:
         try:
             await public_channel.send(message, view=view)
-            await asyncio.sleep(1)  # Añadimos un delay por si se envían múltiples mensajes seguidos
+            await asyncio.sleep(1)  # Delay para evitar múltiples mensajes seguidos
         except discord.HTTPException as e:
             print(f"Error al enviar mensaje público: {e}")
     else:
@@ -542,11 +542,13 @@ async def on_message(message):
 
         if user_attempts >= max_attempts_per_user:
             await message.channel.send(f"🚫 {message.author.mention}, has alcanzado el número máximo de intentos para esta trivia.")
+            await asyncio.sleep(0.5)
             return
 
         normalized_answer = normalize_string(message.content)
         if normalized_answer == trivia["answer"]:
             await message.channel.send(f"🎉 ¡Correcto, {message.author.mention}! Has acertado la trivia.")
+            await asyncio.sleep(0.5)
             del active_trivia[message.channel.id]
             # Puedes agregar lógica para otorgar puntos aquí si lo deseas
         else:
@@ -554,9 +556,10 @@ async def on_message(message):
             attempts_left = max_attempts_per_user - trivia["attempts"][message.author.id]
             if attempts_left > 0:
                 await message.channel.send(f"❌ Respuesta incorrecta, {message.author.mention}. Te quedan {attempts_left} intentos.")
+                await asyncio.sleep(0.5)
             else:
                 await message.channel.send(f"❌ Has agotado tus intentos, {message.author.mention}.")
-                # Opcionalmente, podrías eliminar al usuario de los intentos para que no siga recibiendo mensajes
+                await asyncio.sleep(0.5)
 
 ######################################
 # EVENTO ON_COMMAND_ERROR

@@ -17,9 +17,27 @@ import urllib.parse  # para parsear la URL de la base de datos
 
 # Mapeo de países a zonas horarias
 country_timezones = {
-    "Peru": "America/Lima",
-    "Mexico": "America/Mexico_City",
-    "Argentina": "America/Argentina/Buenos_Aires"
+    "Argentina": "America/Argentina/Buenos_Aires",
+    "Bolivia": "America/La_Paz",
+    "Chile": "America/Santiago",
+    "Colombia": "America/Bogota",
+    "Costa Rica": "America/Costa_Rica",
+    "Cuba": "America/Havana",
+    "Ecuador": "America/Guayaquil",
+    "El Salvador": "America/El_Salvador",
+    "España": "Europe/Madrid",
+    "Guatemala": "America/Guatemala",
+    "Honduras": "America/Tegucigalpa",
+    "México": "America/Mexico_City",
+    "Nicaragua": "America/Managua",
+    "Panamá": "America/Panama",
+    "Paraguay": "America/Asuncion",
+    "Perú": "America/Lima",
+    "Puerto Rico": "America/Puerto_Rico",
+    "República Dominicana": "America/Santo_Domingo",
+    "Uruguay": "America/Montevideo",
+    "Venezuela": "America/Caracas",
+    "Guinea Ecuatorial": "Africa/Malabo"
 }
 
 ######################################
@@ -119,7 +137,7 @@ init_db()
 ######################################
 # VARIABLES GLOBALES ADICIONALES
 ######################################
-# Para DM forwarding según condiciones especiales
+# Para el reenvío de mensajes DM en condiciones especiales (etapas 6, 7, 8)
 dm_forwarding = {}  # Diccionario: user_id (str) -> None (indefinido) o datetime (fecha de expiración)
 
 ######################################
@@ -146,7 +164,7 @@ forwarding_end_time = None
 ######################################
 # VARIABLE GLOBAL PARA TRIVIA
 ######################################
-active_trivia = {}  # Diccionario: channel.id -> {"question":..., "answer":..., "hint1":..., "hint2":..., "attempts": {...}}
+active_trivia = {}  # Diccionario: channel.id -> {"question": ..., "answer": ..., "hint1": ..., "hint2": ..., "attempts": {...}}
 
 # Caches para chistes y trivias
 global_jokes_cache = []
@@ -472,13 +490,11 @@ async def avanzar_etapa(ctx, etapa: int):
             upsert_participant(user_id, participant)
             await asyncio.sleep(0.1)
         await ctx.send(f"✅ Etapa actualizada a {etapa}. {limite_jugadores} jugadores han avanzado a esta etapa.")
-        # Enviar notificaciones solo si se asciende a una etapa superior
         if etapa > old_stage:
             for user_id, participant in advanced:
                 user = bot.get_user(int(user_id))
                 if user is not None:
                     try:
-                        # Mensajes especiales para etapas 6, 7 y 8
                         if etapa == 6:
                             msg = "🏆 ¡Felicidades! Eres el campeón del torneo y acabas de ganar 2800 paVos que se te entregarán en forma de regalos de la tienda de objetos de Fortnite, así que envíame los nombres de los objetos que quieres que te regale que sumen 2800 paVos."
                             dm_forwarding[user_id] = None  # reenvío indefinido
@@ -644,7 +660,7 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    # DM forwarding: Si el mensaje es un DM y el usuario está en dm_forwarding, reenvía al canal SPECIAL_HELP_CHANNEL.
+    # Si el mensaje es un DM y el usuario está en dm_forwarding, reenvía al canal SPECIAL_HELP_CHANNEL
     if message.guild is None:
         if message.author.id in dm_forwarding:
             end_time = dm_forwarding[message.author.id]
@@ -664,14 +680,14 @@ async def on_message(message):
                     await asyncio.sleep(1)
     await bot.process_commands(message)
     
-    # Procesamiento de respuestas de trivia
-    if message.channel.id in active_trivia:
+    # Procesamiento de respuestas de trivia (solo en canales, no DM)
+    if message.guild is not None and message.channel.id in active_trivia:
         trivia_data = active_trivia[message.channel.id]
         user_attempts = trivia_data["attempts"].get(message.author.id, 0)
         max_attempts_per_user = 3
         if user_attempts >= max_attempts_per_user:
             if user_attempts == max_attempts_per_user:
-                await message.channel.send(f"🚫 {message.author.mention}, has alcanzado el número máximo de intentos para esta trivia.")
+                await message.channel.send(f"❌ Has agotado tus intentos, {message.author.mention}.")
                 trivia_data["attempts"][message.author.id] = max_attempts_per_user + 1
             return
         normalized_answer = normalize_string(message.content)
@@ -733,7 +749,8 @@ async def event_notifier():
                     if user is not None:
                         tz_user = ZoneInfo(country_timezones.get(user_row["country"], "UTC"))
                         local_dt = event_dt.astimezone(tz_user)
-                        msg = f"⏰ Faltan 10 horas para '{ev['name']}', que se realizará el {local_dt.strftime('%d/%m/%Y %H:%M')} hora {user_row['country']}."
+                        msg = (f"⏰ Faltan 10 horas para '{ev['name']}', que se realizará el "
+                               f"{local_dt.strftime('%d/%m/%Y %H:%M')} hora {user_row['country']}. Recuerda que si llegas tarde, quedarás automáticamente eliminado del torneo así tengas puntaje alto.")
                         try:
                             await user.send(msg)
                         except Exception as e:
@@ -751,7 +768,8 @@ async def event_notifier():
                     if user is not None:
                         tz_user = ZoneInfo(country_timezones.get(user_row["country"], "UTC"))
                         local_dt = event_dt.astimezone(tz_user)
-                        msg = f"⏰ Faltan 2 horas para '{ev['name']}', que se realizará el {local_dt.strftime('%d/%m/%Y %H:%M')} hora {user_row['country']}."
+                        msg = (f"⏰ Faltan 2 horas para '{ev['name']}', que se realizará el "
+                               f"{local_dt.strftime('%d/%m/%Y %H:%M')} hora {user_row['country']}. Recuerda que si llegas tarde, quedarás automáticamente eliminado del torneo así tengas puntaje alto.")
                         try:
                             await user.send(msg)
                         except Exception as e:

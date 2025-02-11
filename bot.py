@@ -399,7 +399,6 @@ async def eliminar_todas_trivias(ctx):
     await asyncio.sleep(1)
 
 # Otros comandos Pro...
-
 ######################################
 # COMANDOS COMUNES (DISPONIBLES PARA TODOS)
 ######################################
@@ -414,7 +413,12 @@ async def trivia_command(ctx):
         del active_trivia[ctx.channel.id]
     trivia_item = get_random_trivia()
     if trivia_item:
-        active_trivia[ctx.channel.id] = trivia_item
+        active_trivia[ctx.channel.id] = {
+            "question": trivia_item["question"],
+            "answer": normalize_string(trivia_item["answer"]),
+            "hint": trivia_item.get("hint", ""),
+            "attempts": {}
+        }
         await ctx.send(f"**Trivia:** {trivia_item['question']}\n_Responde en el chat._")
     else:
         await ctx.send("No tengo más trivias disponibles en este momento.")
@@ -479,7 +483,6 @@ async def on_message_no_prefix(message):
         await ranking_command(ctx)
     elif content == 'topmejores':
         await topmejores_command(ctx)
-    # Agrega aquí otros comandos comunes sin prefijo
     else:
         await bot.process_commands(message)
 
@@ -504,6 +507,30 @@ async def on_message(message):
                 print(f"Error forwarding message: {e}")
     # El resto de la lógica se maneja en on_message_no_prefix
     await bot.process_commands(message)
+    
+    # Verificar respuestas de trivia
+    if message.channel.id in active_trivia:
+        trivia = active_trivia[message.channel.id]
+        user_attempts = trivia["attempts"].get(message.author.id, 0)
+        max_attempts_per_user = 3  # Número máximo de intentos por usuario
+
+        if user_attempts >= max_attempts_per_user:
+            await message.channel.send(f"🚫 {message.author.mention}, has alcanzado el número máximo de intentos para esta trivia.")
+            return
+
+        normalized_answer = normalize_string(message.content)
+        if normalized_answer == trivia["answer"]:
+            await message.channel.send(f"🎉 ¡Correcto, {message.author.mention}! Has acertado la trivia.")
+            del active_trivia[message.channel.id]
+            # Puedes agregar lógica para otorgar puntos aquí si lo deseas
+        else:
+            trivia["attempts"][message.author.id] = user_attempts + 1
+            attempts_left = max_attempts_per_user - trivia["attempts"][message.author.id]
+            if attempts_left > 0:
+                await message.channel.send(f"❌ Respuesta incorrecta, {message.author.mention}. Te quedan {attempts_left} intentos.")
+            else:
+                await message.channel.send(f"❌ Has agotado tus intentos, {message.author.mention}.")
+                # Opcionalmente, podrías eliminar al usuario de los intentos para que no siga recibiendo mensajes
 
 ######################################
 # EVENTO ON_COMMAND_ERROR

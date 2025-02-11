@@ -30,21 +30,6 @@ API_SECRET = os.environ.get("API_SECRET")  # Para la API privada (opcional)
 # CONEXIÓN A LA BASE DE DATOS POSTGRESQL
 ######################################
 DATABASE_URL = os.environ.get("DATABASE_URL")
-if not DATABASE_URL:
-    raise Exception("DATABASE_URL environment variable not set")
-
-# Se elimina el forzado de SSL, ya que no lo usas y antes funcionaba sin él.
-
-# Si el hostname no contiene un punto, se asume que falta la parte del dominio.
-# Se le agrega el sufijo por defecto ".db.render.com" (para la región Oregon, US West).
-parsed_url = urllib.parse.urlparse(DATABASE_URL)
-if parsed_url.hostname and '.' not in parsed_url.hostname:
-    new_hostname = parsed_url.hostname + ".db.render.com"
-    netloc = new_hostname
-    if parsed_url.port:
-        netloc += f":{parsed_url.port}"
-    parsed_url = parsed_url._replace(netloc=netloc)
-    DATABASE_URL = urllib.parse.urlunparse(parsed_url)
 
 conn = psycopg2.connect(DATABASE_URL)
 conn.autocommit = True

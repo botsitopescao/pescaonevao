@@ -681,10 +681,11 @@ async def on_message(message):
                     except Exception as e:
                         print(f"Error forwarding DM from {message.author.id}: {e}")
                     await asyncio.sleep(1)
-    if getattr(message, '_nonprefix_command_invoked', False):
-        return
     await bot.process_commands(message)
-    
+    ctx = await bot.get_context(message)
+    if ctx.valid and ctx.command is not None:
+        return
+
     # Procesamiento de respuestas de trivia (solo en canales, no en DM)
     if message.guild is not None and message.channel.id in active_trivia:
         trivia_data = active_trivia[message.channel.id]

@@ -699,6 +699,7 @@ async def on_message(message):
         if user_attempts >= max_attempts_per_user:
             if user_attempts == max_attempts_per_user:
                 await message.channel.send(f"❌ Has agotado tus intentos, {message.author.mention}.")
+                await asyncio.sleep(0.5)
                 trivia_data["attempts"][message.author.id] = max_attempts_per_user + 1
             return
         normalized_answer = normalize_string(message.content)
@@ -720,6 +721,7 @@ async def on_message(message):
             else:
                 await message.channel.send(f"❌ Has agotado tus intentos, {message.author.mention}.")
                 await asyncio.sleep(0.5)
+                del active_trivia[message.channel.id]
 
 ######################################
 # EVENTO ON_COMMAND_ERROR

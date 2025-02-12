@@ -453,8 +453,8 @@ async def crear_evento(ctx, fase: int, grupo: int, date: str, time: str, *, even
         return
     with conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO calendar_events (event_datetime, name, target_stage, target_group, notified_10h, notified_2h) VALUES (%s, %s, %s, %s, FALSE, FALSE)",
-            (event_dt, event_name, fase, grupo)
+            "INSERT INTO calendar_events (event_time, event_datetime, name, target_stage, target_group, notified_10h, notified_2h) VALUES (%s, %s, %s, %s, %s, FALSE, FALSE)",
+            (event_dt, event_dt, event_name, fase, grupo)
         )
     await ctx.send(f"✅ Evento '{event_name}' creado para la fase {fase} y grupo {grupo} para el {dt_str}.")
 

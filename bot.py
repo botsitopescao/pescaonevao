@@ -687,6 +687,17 @@ async def topmejores(ctx):
     else:
         await ctx.send("No hay participantes en el torneo.")
 
+@bot.command()
+async def vermigrupo(ctx):
+    user_id = str(ctx.author.id)
+    participant = get_participant(user_id)
+    if participant:
+        etapa = participant.get("etapa", "N/A")
+        grupo = participant.get("grupo", "N/A")
+        await ctx.send(f"Hola {user_id}, estás en la etapa {etapa} del torneo y tu grupo es el {grupo}.")
+    else:
+        await ctx.send("❌ No estás registrado en el torneo.")
+
 @bot.listen('on_message')
 async def on_message_no_prefix(message):
     if message.author.bot:
@@ -694,7 +705,7 @@ async def on_message_no_prefix(message):
     if message.content.startswith(PREFIX):
         return
     content = message.content.lower().strip()
-    if content in ('trivia', 'chiste', 'ranking', 'topmejores'):
+    if content in ('trivia', 'chiste', 'ranking', 'topmejores', 'vermigrupo'):
         # Se usa la versión en minúsculas para evitar problemas de case sensitivity.
         message.content = PREFIX + content
         ctx = await bot.get_context(message)

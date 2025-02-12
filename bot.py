@@ -442,6 +442,19 @@ async def borrar_usuario(ctx, user_id: str):
     await ctx.send(f"✅ Se ha eliminado el usuario con ID {user_id} del registro.")
     await asyncio.sleep(1)
 
+@bot.command()
+async def asignadomanual(ctx, user_id: str, stage: int, group: int):
+    if not is_owner_and_allowed(ctx):
+        return
+    participant = get_participant(user_id)
+    if not participant:
+        await ctx.send("❌ Usuario no registrado en el torneo.")
+        return
+    with conn.cursor() as cur:
+        cur.execute("UPDATE registrations SET etapa = %s, grupo = %s WHERE user_id = %s", (stage, group, user_id))
+    await ctx.send(f"✅ Usuario {user_id} asignado a la etapa {stage} y grupo {group}.")
+    await asyncio.sleep(1)
+
 ######################################
 # COMANDOS DE EVENTOS (SOLO OWNER_ID) - NUEVOS COMANDOS
 ######################################

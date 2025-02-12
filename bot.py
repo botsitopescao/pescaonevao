@@ -78,6 +78,7 @@ def init_db():
         cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS country TEXT")
         cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS puntuacion INTEGER DEFAULT 0")
         cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS etapa INTEGER DEFAULT 1")
+        cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS grupo INTEGER DEFAULT 0")
         
         # Tabla de chistes
         cur.execute("""
@@ -138,6 +139,7 @@ def init_db():
         cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS target_stage INTEGER NOT NULL DEFAULT 0")
         cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS notified_10h BOOLEAN DEFAULT FALSE")
         cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS notified_2h BOOLEAN DEFAULT FALSE")
+        cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS target_group INTEGER NOT NULL DEFAULT 0")
 init_db()
 
 ######################################
@@ -439,8 +441,14 @@ async def borrar_usuario(ctx, user_id: str):
 # COMANDOS DE EVENTOS (SOLO OWNER_ID) - NUEVOS COMANDOS
 ######################################
 @bot.command(aliases=["agregar_evento"])
-async def crear_evento(ctx, date: str, time: str, *, event_name: str):
+async def crear_evento(ctx, fase: str, grupo: str, date: str, time: str, *, event_name: str):
     if not is_owner_and_allowed(ctx):
+        return
+    try:
+        fase_int = int(fase)
+        grupo_int = int(grupo)
+    except Exception as e:
+        await ctx.send("❌ Fase y Grupo deben ser números enteros.")
         return
     dt_str = f"{date} {time}"
     try:
@@ -449,13 +457,12 @@ async def crear_evento(ctx, date: str, time: str, *, event_name: str):
     except Exception as e:
         await ctx.send("❌ Formato de fecha u hora incorrecto. Usa dd/mm/aaaa hh:mm")
         return
-    # Se inserta en la columna "event_time" (valor completo de event_dt) y se agrega "description" con cadena vacía
     with conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO calendar_events (event_time, description, name, event_datetime, target_stage, notified_10h, notified_2h) VALUES (%s, %s, %s, %s, %s, FALSE, FALSE)",
-            (event_dt, "", event_name, event_dt, 0)
+            "INSERT INTO calendar_events (event_datetime, name, target_stage, target_group, notified_10h, notified_2h) VALUES (%s, %s, %s, %s, FALSE, FALSE)",
+            (event_dt, event_name, fase_int, grupo_int)
         )
-    await ctx.send(f"✅ Evento '{event_name}' creado para el {dt_str}.")
+    await ctx.send(f"✅ Evento '{event_name}' creado para la fase {fase_int} y grupo {grupo_int} para el {dt_str}.")
 
 @bot.command()
 async def ver_eventos(ctx):
@@ -760,7 +767,7 @@ async def event_notifier():
     while not bot.is_closed():
         now = datetime.datetime.now(tz_peru)
         with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-            cur.execute("SELECT id, name, event_datetime, target_stage, notified_10h, notified_2h FROM calendar_events")
+            cur.execute("SELECT id, name, event_datetime, target_stage, target_group, notified_10h, notified_2h FROM calendar_events")
             events = cur.fetchall()
         for ev in events:
             event_dt = ev["event_datetime"]
@@ -768,7 +775,7 @@ async def event_notifier():
             # Notificar 10 horas antes
             if diff > 0 and diff <= 10 * 3600 and not ev["notified_10h"]:
                 with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-                    cur.execute("SELECT user_id, country FROM registrations WHERE etapa = %s", (ev["target_stage"],))
+                    cur.execute("SELECT user_id, country FROM registrations WHERE etapa = %s AND grupo = %s", (ev["target_stage"], ev["target_group"]))
                     users = cur.fetchall()
                 for user_row in users:
                     user = bot.get_user(int(user_row["user_id"]))
@@ -787,7 +794,7 @@ async def event_notifier():
             # Notificar 2 horas antes
             if diff > 0 and diff <= 2 * 3600 and not ev["notified_2h"]:
                 with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-                    cur.execute("SELECT user_id, country FROM registrations WHERE etapa = %s", (ev["target_stage"],))
+                    cur.execute("SELECT user_id, country FROM registrations WHERE etapa = %s AND grupo = %s", (ev["target_stage"], ev["target_group"]))
                     users = cur.fetchall()
                 for user_row in users:
                     user = bot.get_user(int(user_row["user_id"]))

@@ -404,7 +404,9 @@ async def lista_registrados(ctx):
     data = get_all_participants()
     lines = ["**Lista de Usuarios Registrados:**"]
     for user_id, participant in data["participants"].items():
-        line = f"Discord: {participant['discord_name']} (ID: {user_id}) | Fortnite: {participant['fortnite_username']} | Plataforma: {participant['platform']} | País: {participant['country']} | Puntos: {participant['puntuacion']} | Etapa: {participant['etapa']}"
+        line = (f"Discord: {participant['discord_name']} (ID: {user_id}) | Fortnite: {participant['fortnite_username']} | "
+                f"Plataforma: {participant['platform']} | País: {participant['country']} | Puntos: {participant['puntuacion']} | "
+                f"Etapa: {participant['etapa']} | Grupo: {participant.get('grupo', 'N/A')}")
         lines.append(line)
     full_message = "\n".join(lines)
     await ctx.send(full_message)
@@ -502,10 +504,32 @@ async def avanzar_etapa(ctx, etapa: int):
     if limite_jugadores is not None:
         sorted_players = sorted(data["participants"].items(), key=lambda item: int(item[1].get("puntuacion", 0)), reverse=True)
         advanced = sorted_players[:limite_jugadores]
+        # Asignar la etapa a los jugadores que avanzan
         for user_id, participant in advanced:
             participant["etapa"] = etapa
             upsert_participant(user_id, participant)
-            await asyncio.sleep(1)  # Delay para evitar sobrecarga
+            await asyncio.sleep(1)
+        # Asignar grupos de forma aleatoria según la etapa
+        if etapa in [1, 2, 3, 4, 5]:
+            if etapa == 1:
+                num_groups = 4
+            elif etapa == 2:
+                num_groups = 4
+            elif etapa == 3:
+                num_groups = 4
+            elif etapa == 4:
+                num_groups = 2
+            elif etapa == 5:
+                num_groups = 1
+            else:
+                num_groups = 1
+            advanced_shuffled = advanced[:]  # Copia de la lista
+            random.shuffle(advanced_shuffled)
+            group_size = limite_jugadores // num_groups
+            for i, (user_id, participant) in enumerate(advanced_shuffled):
+                participant["grupo"] = (i // group_size) + 1
+                upsert_participant(user_id, participant)
+                await asyncio.sleep(1)
         await ctx.send(f"✅ Etapa actualizada a {etapa}. {limite_jugadores} jugadores han avanzado a esta etapa.")
         if etapa > old_stage:
             for user_id, participant in advanced:

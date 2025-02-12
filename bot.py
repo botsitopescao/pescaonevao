@@ -441,14 +441,8 @@ async def borrar_usuario(ctx, user_id: str):
 # COMANDOS DE EVENTOS (SOLO OWNER_ID) - NUEVOS COMANDOS
 ######################################
 @bot.command(aliases=["agregar_evento"])
-async def crear_evento(ctx, fase: str, grupo: str, date: str, time: str, *, event_name: str):
+async def crear_evento(ctx, fase: int, grupo: int, date: str, time: str, *, event_name: str):
     if not is_owner_and_allowed(ctx):
-        return
-    try:
-        fase_int = int(fase)
-        grupo_int = int(grupo)
-    except Exception as e:
-        await ctx.send("❌ Fase y Grupo deben ser números enteros.")
         return
     dt_str = f"{date} {time}"
     try:
@@ -460,9 +454,9 @@ async def crear_evento(ctx, fase: str, grupo: str, date: str, time: str, *, even
     with conn.cursor() as cur:
         cur.execute(
             "INSERT INTO calendar_events (event_datetime, name, target_stage, target_group, notified_10h, notified_2h) VALUES (%s, %s, %s, %s, FALSE, FALSE)",
-            (event_dt, event_name, fase_int, grupo_int)
+            (event_dt, event_name, fase, grupo)
         )
-    await ctx.send(f"✅ Evento '{event_name}' creado para la fase {fase_int} y grupo {grupo_int} para el {dt_str}.")
+    await ctx.send(f"✅ Evento '{event_name}' creado para la fase {fase} y grupo {grupo} para el {dt_str}.")
 
 @bot.command()
 async def ver_eventos(ctx):

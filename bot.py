@@ -449,7 +449,7 @@ async def crear_evento(ctx, date: str, time: str, *, event_name: str):
     except Exception as e:
         await ctx.send("❌ Formato de fecha u hora incorrecto. Usa dd/mm/aaaa hh:mm")
         return
-    # Se inserta en la columna "event_time" (valor completo de event_dt) y se agrega la columna "description" con cadena vacía
+    # Se inserta en la columna "event_time" (usamos el valor completo de event_dt) y se agrega "description" con cadena vacía
     with conn.cursor() as cur:
         cur.execute(
             "INSERT INTO calendar_events (event_time, description, name, event_datetime, target_stage, notified_10h, notified_2h) VALUES (%s, %s, %s, %s, %s, FALSE, FALSE)",
@@ -686,8 +686,8 @@ async def on_message(message):
                         print(f"Error forwarding DM from {message.author.id}: {e}")
                     await asyncio.sleep(1)
     await bot.process_commands(message)
-    ctx = await bot.get_context(message)
-    if ctx.valid and ctx.command is not None:
+    # Si el mensaje empieza con el prefijo, se considera un comando y se salta el procesamiento de trivia.
+    if message.content.startswith(PREFIX):
         return
 
     # Procesamiento de respuestas de trivia (solo en canales, no en DM)

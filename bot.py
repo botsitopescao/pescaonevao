@@ -654,7 +654,8 @@ async def on_message_no_prefix(message):
         return
     content = message.content.lower().strip()
     if content in ('trivia', 'chiste', 'ranking', 'topmejores'):
-        message.content = PREFIX + message.content
+        # Se usa la versión en minúsculas para evitar problemas de case sensitivity
+        message.content = PREFIX + content
         ctx = await bot.get_context(message)
         await bot.invoke(ctx)
 

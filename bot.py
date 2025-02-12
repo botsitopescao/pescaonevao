@@ -148,7 +148,7 @@ init_db()
 ######################################
 # VARIABLES GLOBALES ADICIONALES
 ######################################
-dm_forwarding = {}  # Diccionario: user_id (str) -> None o datetime
+dm_forwarding = {}  # Diccionario: user_id -> None o datetime
 
 ######################################
 # CONFIGURACIÓN INICIAL DEL TORNEO
@@ -451,26 +451,24 @@ async def asignadomanual(ctx, user_id: str, stage: int, group: int):
     old_stage = int(participant.get("etapa", 1))
     with conn.cursor() as cur:
         cur.execute("UPDATE registrations SET etapa = %s, grupo = %s WHERE user_id = %s", (stage, group, user_id))
-    # Actualizamos el registro localmente
     participant["etapa"] = stage
     participant["grupo"] = group
     upsert_participant(user_id, participant)
     user = bot.get_user(int(user_id))
     if user is not None:
         try:
-            if stage > old_stage:
-                if stage == 6:
-                    msg = "🏆 ¡Felicidades! Eres el campeón del torneo y acabas de ganar 2800 paVos que se te entregarán en forma de regalos de la tienda de objetos de Fortnite, así que envíame los nombres de los objetos que quieres que te regale que sumen 2800 paVos."
-                    dm_forwarding[user_id] = None
-                elif stage == 7:
-                    msg = "🎁 Todavía te quedan objetos por escoger para completar tu premio de 2800 paVos."
-                    dm_forwarding[user_id] = None
-                elif stage == 8:
-                    msg = "🥇 Tus objetos han sido entregados campeón, muchas gracias por participar, has sido el mejor pescadito del torneo, nos vemos pronto."
-                    dm_forwarding[user_id] = datetime.datetime.utcnow() + datetime.timedelta(days=2)
-                else:
-                    msg = f"🎉 ¡Felicidades! Has avanzado a la etapa {stage}."
-                await user.send(msg)
+            if stage == 6:
+                msg = "🏆 ¡Felicidades! Eres el campeón del torneo y acabas de ganar 2800 paVos que se te entregarán en forma de regalos de la tienda de objetos de Fortnite, así que envíame los nombres de los objetos que quieres que te regale que sumen 2800 paVos."
+                dm_forwarding[user_id] = None
+            elif stage == 7:
+                msg = "🎁 Todavía te quedan objetos por escoger para completar tu premio de 2800 paVos."
+                dm_forwarding[user_id] = None
+            elif stage == 8:
+                msg = "🥇 Tus objetos han sido entregados campeón, muchas gracias por participar, has sido el mejor pescadito del torneo, nos vemos pronto."
+                dm_forwarding[user_id] = datetime.datetime.utcnow() + datetime.timedelta(days=2)
+            else:
+                msg = f"🎉 ¡Felicidades! Has avanzado a la etapa {stage}."
+            await user.send(msg)
         except Exception as e:
             print(f"Error enviando DM a {user_id}: {e}")
     await ctx.send(f"✅ Usuario {user_id} asignado a la etapa {stage} y grupo {group}.")
@@ -538,12 +536,10 @@ async def avanzar_etapa(ctx, etapa: int):
     if limite_jugadores is not None:
         sorted_players = sorted(data["participants"].items(), key=lambda item: int(item[1].get("puntuacion", 0)), reverse=True)
         advanced = sorted_players[:limite_jugadores]
-        # Asignar la etapa a los jugadores que avanzan
         for user_id, participant in advanced:
             participant["etapa"] = etapa
             upsert_participant(user_id, participant)
             await asyncio.sleep(1)
-        # Asignar grupos de forma aleatoria según la etapa
         if etapa in [1, 2, 3, 4, 5]:
             if etapa == 1:
                 num_groups = 4
@@ -557,7 +553,7 @@ async def avanzar_etapa(ctx, etapa: int):
                 num_groups = 1
             else:
                 num_groups = 1
-            advanced_shuffled = advanced[:]  # Copia de la lista
+            advanced_shuffled = advanced[:]
             random.shuffle(advanced_shuffled)
             group_size = limite_jugadores // num_groups
             for i, (user_id, participant) in enumerate(advanced_shuffled):
@@ -653,7 +649,6 @@ async def trivia(ctx):
     if ctx.channel.id in active_trivia:
         del active_trivia[ctx.channel.id]
     global global_trivias_cache
-    # Cargar la lista de trivias desde la base de datos solo la primera vez.
     if not global_trivias_cache:
         if not hasattr(trivia, "initialized"):
             with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:

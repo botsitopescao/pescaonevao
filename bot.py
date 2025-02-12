@@ -466,7 +466,7 @@ async def ver_eventos(ctx):
     if not is_owner_and_allowed(ctx):
         return
     with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-        cur.execute("SELECT id, name, event_datetime FROM calendar_events ORDER BY id")
+        cur.execute("SELECT id, name, event_datetime, target_stage, target_group FROM calendar_events ORDER BY id")
         events = cur.fetchall()
     if events:
         lines = ["**Eventos en el Calendario:**"]
@@ -474,7 +474,7 @@ async def ver_eventos(ctx):
             dt = ev["event_datetime"]
             date_str = dt.strftime("%d/%m/%Y")
             time_str = dt.strftime("%H:%M")
-            lines.append(f"ID: {ev['id']} - {date_str} {time_str} - {ev['name']}")
+            lines.append(f"ID: {ev['id']} - {date_str} {time_str} - {ev['name']} - Fase: {ev['target_stage']} - Grupo: {ev['target_group']}")
         await ctx.send("\n".join(lines))
     else:
         await ctx.send("No hay eventos en el calendario.")

@@ -438,6 +438,21 @@ async def borrar_usuario(ctx, user_id: str):
 ######################################
 # COMANDOS DE EVENTOS (SOLO OWNER_ID) - NUEVOS COMANDOS
 ######################################
+@bot.command(aliases=["agregar_evento"])
+async def crear_evento(ctx, date: str, time: str, *, event_name: str):
+    if not is_owner_and_allowed(ctx):
+        return
+    dt_str = f"{date} {time}"
+    try:
+        event_dt = datetime.datetime.strptime(dt_str, "%d/%m/%Y %H:%M")
+        event_dt = event_dt.replace(tzinfo=ZoneInfo("America/Lima"))
+    except Exception as e:
+        await ctx.send("❌ Formato de fecha u hora incorrecto. Usa dd/mm/aaaa hh:mm")
+        return
+    with conn.cursor() as cur:
+        cur.execute("INSERT INTO calendar_events (name, event_datetime, target_stage, notified_10h, notified_2h) VALUES (%s, %s, %s, FALSE, FALSE)", (event_name, event_dt, 0))
+    await ctx.send(f"✅ Evento '{event_name}' creado para el {dt_str}.")
+
 @bot.command()
 async def ver_eventos(ctx):
     if not is_owner_and_allowed(ctx):
@@ -455,21 +470,6 @@ async def ver_eventos(ctx):
         await ctx.send("\n".join(lines))
     else:
         await ctx.send("No hay eventos en el calendario.")
-
-@bot.command()
-async def crear_evento(ctx, date: str, time: str, *, event_name: str):
-    if not is_owner_and_allowed(ctx):
-        return
-    dt_str = f"{date} {time}"
-    try:
-        event_dt = datetime.datetime.strptime(dt_str, "%d/%m/%Y %H:%M")
-        event_dt = event_dt.replace(tzinfo=ZoneInfo("America/Lima"))
-    except Exception as e:
-        await ctx.send("❌ Formato de fecha u hora incorrecto. Usa dd/mm/aaaa hh:mm")
-        return
-    with conn.cursor() as cur:
-        cur.execute("INSERT INTO calendar_events (name, event_datetime, target_stage, notified_10h, notified_2h) VALUES (%s, %s, %s, FALSE, FALSE)", (event_name, event_dt, 0))
-    await ctx.send(f"✅ Evento '{event_name}' creado para el {dt_str}.")
 
 @bot.command()
 async def borrar_evento(ctx, event_id: int):

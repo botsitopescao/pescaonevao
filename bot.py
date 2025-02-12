@@ -170,7 +170,7 @@ forwarding_end_time = None
 ######################################
 # VARIABLE GLOBAL PARA TRIVIA
 ######################################
-active_trivia = {}  # Diccionario: channel.id -> {"question": ..., "answer": ..., "hint1": ..., "hint2": ..., "attempts": {...}}
+active_trivia = {}  # Diccionario: channel.id -> {"question": ..., "answer": ..., "hint1": ..., "hint2": ..., "attempts": {}}
 
 # Caches para chistes y trivias
 global_jokes_cache = []
@@ -449,7 +449,7 @@ async def crear_evento(ctx, date: str, time: str, *, event_name: str):
     except Exception as e:
         await ctx.send("❌ Formato de fecha u hora incorrecto. Usa dd/mm/aaaa hh:mm")
         return
-    # Se inserta en la columna "event_time" (usamos el valor completo de event_dt) y se agrega "description" con cadena vacía
+    # Se inserta en la columna "event_time" (valor completo de event_dt) y se agrega "description" con cadena vacía
     with conn.cursor() as cur:
         cur.execute(
             "INSERT INTO calendar_events (event_time, description, name, event_datetime, target_stage, notified_10h, notified_2h) VALUES (%s, %s, %s, %s, %s, FALSE, FALSE)",
@@ -660,7 +660,7 @@ async def on_message_no_prefix(message):
         await bot.invoke(ctx)
 
 ######################################
-# EVENTO ON_MESSAGE (DM FORWARDING Y TRIVIA RESPUESTAS)
+# EVENTO ON_MESSAGE (DM FORWARDING Y RESPUESTAS DE TRIVIA)
 ######################################
 @bot.event
 async def on_message(message):
@@ -685,8 +685,12 @@ async def on_message(message):
                     except Exception as e:
                         print(f"Error forwarding DM from {message.author.id}: {e}")
                     await asyncio.sleep(1)
-    await bot.process_commands(message)
-    # Si el mensaje empieza con el prefijo, se considera un comando y se salta el procesamiento de trivia.
+    try:
+        await bot.process_commands(message)
+    except commands.CommandNotFound:
+        pass
+
+    # Si el mensaje comienza con el prefijo, se considera comando y no se procesa como respuesta de trivia.
     if message.content.startswith(PREFIX):
         return
 

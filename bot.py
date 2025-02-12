@@ -148,8 +148,7 @@ init_db()
 ######################################
 # VARIABLES GLOBALES ADICIONALES
 ######################################
-# Para el reenvío de mensajes DM en condiciones especiales (etapas 6, 7, 8)
-dm_forwarding = {}  # Diccionario: user_id (str) -> None (reenvío indefinido) o datetime (fecha de expiración)
+dm_forwarding = {}  # Diccionario: user_id (str) -> None o datetime
 
 ######################################
 # CONFIGURACIÓN INICIAL DEL TORNEO
@@ -175,9 +174,8 @@ forwarding_end_time = None
 ######################################
 # VARIABLE GLOBAL PARA TRIVIA
 ######################################
-active_trivia = {}  # Diccionario: channel.id -> {"question": ..., "answer": ..., "hint1": ..., "hint2": ..., "attempts": {}}
+active_trivia = {}
 
-# Caches para chistes y trivias
 global_jokes_cache = []
 global_trivias_cache = []
 
@@ -450,8 +448,31 @@ async def asignadomanual(ctx, user_id: str, stage: int, group: int):
     if not participant:
         await ctx.send("❌ Usuario no registrado en el torneo.")
         return
+    old_stage = int(participant.get("etapa", 1))
     with conn.cursor() as cur:
         cur.execute("UPDATE registrations SET etapa = %s, grupo = %s WHERE user_id = %s", (stage, group, user_id))
+    # Actualizamos el registro localmente
+    participant["etapa"] = stage
+    participant["grupo"] = group
+    upsert_participant(user_id, participant)
+    user = bot.get_user(int(user_id))
+    if user is not None:
+        try:
+            if stage > old_stage:
+                if stage == 6:
+                    msg = "🏆 ¡Felicidades! Eres el campeón del torneo y acabas de ganar 2800 paVos que se te entregarán en forma de regalos de la tienda de objetos de Fortnite, así que envíame los nombres de los objetos que quieres que te regale que sumen 2800 paVos."
+                    dm_forwarding[user_id] = None
+                elif stage == 7:
+                    msg = "🎁 Todavía te quedan objetos por escoger para completar tu premio de 2800 paVos."
+                    dm_forwarding[user_id] = None
+                elif stage == 8:
+                    msg = "🥇 Tus objetos han sido entregados campeón, muchas gracias por participar, has sido el mejor pescadito del torneo, nos vemos pronto."
+                    dm_forwarding[user_id] = datetime.datetime.utcnow() + datetime.timedelta(days=2)
+                else:
+                    msg = f"🎉 ¡Felicidades! Has avanzado a la etapa {stage}."
+                await user.send(msg)
+        except Exception as e:
+            print(f"Error enviando DM a {user_id}: {e}")
     await ctx.send(f"✅ Usuario {user_id} asignado a la etapa {stage} y grupo {group}.")
     await asyncio.sleep(1)
 
@@ -551,10 +572,10 @@ async def avanzar_etapa(ctx, etapa: int):
                     try:
                         if etapa == 6:
                             msg = "🏆 ¡Felicidades! Eres el campeón del torneo y acabas de ganar 2800 paVos que se te entregarán en forma de regalos de la tienda de objetos de Fortnite, así que envíame los nombres de los objetos que quieres que te regale que sumen 2800 paVos."
-                            dm_forwarding[user_id] = None  # reenvío indefinido
+                            dm_forwarding[user_id] = None
                         elif etapa == 7:
                             msg = "🎁 Todavía te quedan objetos por escoger para completar tu premio de 2800 paVos."
-                            dm_forwarding[user_id] = None  # reenvío indefinido
+                            dm_forwarding[user_id] = None
                         elif etapa == 8:
                             msg = "🥇 Tus objetos han sido entregados campeón, muchas gracias por participar, has sido el mejor pescadito del torneo, nos vemos pronto."
                             dm_forwarding[user_id] = datetime.datetime.utcnow() + datetime.timedelta(days=2)
@@ -720,7 +741,6 @@ async def on_message_no_prefix(message):
         return
     content = message.content.lower().strip()
     if content in ('trivia', 'chiste', 'ranking', 'topmejores', 'vermigrupo'):
-        # Se usa la versión en minúsculas para evitar problemas de case sensitivity.
         message.content = PREFIX + content
         ctx = await bot.get_context(message)
         await bot.invoke(ctx)
@@ -732,8 +752,6 @@ async def on_message_no_prefix(message):
 async def on_message(message):
     if message.author.bot:
         return
-
-    # Si el mensaje es un DM y el usuario está en dm_forwarding, reenvía al canal SPECIAL_HELP_CHANNEL.
     if message.guild is None:
         if message.author.id in dm_forwarding:
             end_time = dm_forwarding[message.author.id]
@@ -752,12 +770,8 @@ async def on_message(message):
                         print(f"Error forwarding DM from {message.author.id}: {e}")
                     await asyncio.sleep(1)
     await bot.process_commands(message)
-
-    # Si el mensaje comienza con el prefijo, se considera comando y no se procesa como respuesta de trivia.
     if message.content.startswith(PREFIX):
         return
-
-    # Procesamiento de respuestas de trivia (sin filtrar por guild, para asegurar que se procesen en canales)
     if message.channel.id in active_trivia:
         trivia_data = active_trivia[message.channel.id]
         user_attempts = trivia_data["attempts"].get(message.author.id, 0)
@@ -818,7 +832,6 @@ async def event_notifier():
         for ev in events:
             event_dt = ev["event_datetime"]
             diff = (event_dt - now).total_seconds()
-            # Notificar 10 horas antes
             if diff > 0 and diff <= 10 * 3600 and not ev["notified_10h"]:
                 with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
                     cur.execute("SELECT user_id, country FROM registrations WHERE etapa = %s AND grupo = %s", (ev["target_stage"], ev["target_group"]))
@@ -837,7 +850,6 @@ async def event_notifier():
                         await asyncio.sleep(1)
                 with conn.cursor() as cur:
                     cur.execute("UPDATE calendar_events SET notified_10h = TRUE WHERE id = %s", (ev["id"],))
-            # Notificar 2 horas antes
             if diff > 0 and diff <= 2 * 3600 and not ev["notified_2h"]:
                 with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
                     cur.execute("SELECT user_id, country FROM registrations WHERE etapa = %s AND grupo = %s", (ev["target_stage"], ev["target_group"]))
@@ -856,7 +868,6 @@ async def event_notifier():
                         await asyncio.sleep(1)
                 with conn.cursor() as cur:
                     cur.execute("UPDATE calendar_events SET notified_2h = TRUE WHERE id = %s", (ev["id"],))
-            # Notificar 10 minutos antes
             if diff > 0 and diff <= 10 * 60 and not ev["notified_10m"]:
                 with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
                     cur.execute("SELECT user_id, country FROM registrations WHERE etapa = %s AND grupo = %s", (ev["target_stage"], ev["target_group"]))
@@ -875,7 +886,6 @@ async def event_notifier():
                         await asyncio.sleep(1)
                 with conn.cursor() as cur:
                     cur.execute("UPDATE calendar_events SET notified_10m = TRUE WHERE id = %s", (ev["id"],))
-            # Notificar 2 minutos antes
             if diff > 0 and diff <= 2 * 60 and not ev["notified_2m"]:
                 with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
                     cur.execute("SELECT user_id, country FROM registrations WHERE etapa = %s AND grupo = %s", (ev["target_stage"], ev["target_group"]))

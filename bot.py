@@ -651,7 +651,6 @@ async def on_message_no_prefix(message):
     content = message.content.lower().strip()
     if content in ('trivia', 'chiste', 'ranking', 'topmejores'):
         message.content = PREFIX + message.content
-        message._nonprefix_command_invoked = True
         ctx = await bot.get_context(message)
         await bot.invoke(ctx)
 

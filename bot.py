@@ -449,8 +449,12 @@ async def crear_evento(ctx, date: str, time: str, *, event_name: str):
     except Exception as e:
         await ctx.send("❌ Formato de fecha u hora incorrecto. Usa dd/mm/aaaa hh:mm")
         return
+    # Se insertan además los valores para event_date y event_time
     with conn.cursor() as cur:
-        cur.execute("INSERT INTO calendar_events (name, event_datetime, target_stage, notified_10h, notified_2h) VALUES (%s, %s, %s, FALSE, FALSE)", (event_name, event_dt, 0))
+        cur.execute(
+            "INSERT INTO calendar_events (event_date, event_time, name, event_datetime, target_stage, notified_10h, notified_2h) VALUES (%s, %s, %s, %s, %s, FALSE, FALSE)",
+            (event_dt.date(), event_dt.time(), event_name, event_dt, 0)
+        )
     await ctx.send(f"✅ Evento '{event_name}' creado para el {dt_str}.")
 
 @bot.command()

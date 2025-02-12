@@ -667,7 +667,7 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    # Si el mensaje es un DM y el usuario está en dm_forwarding, reenvía al canal SPECIAL_HELP_CHANNEL.
+ # Si el mensaje es un DM y el usuario está en dm_forwarding, reenvía al canal SPECIAL_HELP_CHANNEL.
     if message.guild is None:
         if message.author.id in dm_forwarding:
             end_time = dm_forwarding[message.author.id]
@@ -685,17 +685,14 @@ async def on_message(message):
                     except Exception as e:
                         print(f"Error forwarding DM from {message.author.id}: {e}")
                     await asyncio.sleep(1)
-    try:
-        await bot.process_commands(message)
-    except commands.CommandNotFound:
-        pass
+    await bot.process_commands(message)
 
     # Si el mensaje comienza con el prefijo, se considera comando y no se procesa como respuesta de trivia.
     if message.content.startswith(PREFIX):
         return
 
-    # Procesamiento de respuestas de trivia (solo en canales, no en DM)
-    if message.guild is not None and message.channel.id in active_trivia:
+    # Procesamiento de respuestas de trivia (sin filtrar por guild, para asegurar que se procesen en canales)
+    if message.channel.id in active_trivia:
         trivia_data = active_trivia[message.channel.id]
         user_attempts = trivia_data["attempts"].get(message.author.id, 0)
         max_attempts_per_user = 3
@@ -740,6 +737,58 @@ async def on_command_error(ctx, error):
 @bot.event
 async def on_ready():
     print(f'Bot conectado como {bot.user.name}')
+    bot.loop.create_task(event_notifier())
+
+async def event_notifier():
+    await bot.wait_until_ready()
+    tz_peru = ZoneInfo("America/Lima")
+    while not bot.is_closed():
+        now = datetime.datetime.now(tz_peru)
+        with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+            cur.execute("SELECT id, name, event_datetime, target_stage, notified_10h, notified_2h FROM calendar_events")
+            events = cur.fetchall()
+        for ev in events:
+            event_dt = ev["event_datetime"]
+            diff = (event_dt - now).total_seconds()
+            # Notificar 10 horas antes
+            if diff > 0 and diff <= 10 * 3600 and not ev["notified_10h"]:
+                with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+                    cur.execute("SELECT user_id, country FROM registrations WHERE etapa = %s", (ev["target_stage"],))
+                    users = cur.fetchall()
+                for user_row in users:
+                    user = bot.get_user(int(user_row["user_id"]))
+                    if user is not None:
+                        tz_user = ZoneInfo(country_timezones.get(user_row["country"], "UTC"))
+                        local_dt = event_dt.astimezone(tz_user)
+                        msg = (f"⏰ Faltan 10 horas para '{ev['name']}', que se realizará el "
+                               f"{local_dt.strftime('%d/%m/%Y %H:%M')} hora {user_row['country']}. Recuerda que si llegas tarde, quedarás automáticamente eliminado del torneo así tengas puntaje alto.")
+                        try:
+                            await user.send(msg)
+                        except Exception as e:
+                            print(f"Error enviando DM de 10 horas a {user_row['user_id']}: {e}")
+                        await asyncio.sleep(1)
+                with conn.cursor() as cur:
+                    cur.execute("UPDATE calendar_events SET notified_10h = TRUE WHERE id = %s", (ev["id"],))
+            # Notificar 2 horas antes
+            if diff > 0 and diff <= 2 * 3600 and not ev["notified_2h"]:
+                with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+                    cur.execute("SELECT user_id, country FROM registrations WHERE etapa = %s", (ev["target_stage"],))
+                    users = cur.fetchall()
+                for user_row in users:
+                    user = bot.get_user(int(user_row["user_id"]))
+                    if user is not None:
+                        tz_user = ZoneInfo(country_timezones.get(user_row["country"], "UTC"))
+                        local_dt = event_dt.astimezone(tz_user)
+                        msg = (f"⏰ Faltan 2 horas para '{ev['name']}', que se realizará el "
+                               f"{local_dt.strftime('%d/%m/%Y %H:%M')} hora {user_row['country']}. Recuerda que si llegas tarde, quedarás automáticamente eliminado del torneo así tengas puntaje alto.")
+                        try:
+                            await user.send(msg)
+                        except Exception as e:
+                            print(f"Error enviando DM de 2 horas a {user_row['user_id']}: {e}")
+                        await asyncio.sleep(1)
+                with conn.cursor() as cur:
+                    cur.execute("UPDATE calendar_events SET notified_2h = TRUE WHERE id = %s", (ev["id"],))
+        await asyncio.sleep(60)
 
 ######################################
 # SERVIDOR WEB PARA MANTENER EL BOT ACTIVO (API PRIVADA)

@@ -692,9 +692,10 @@ async def vermigrupo(ctx):
     user_id = str(ctx.author.id)
     participant = get_participant(user_id)
     if participant:
+        fortnite_username = participant.get("fortnite_username", user_id)
         etapa = participant.get("etapa", "N/A")
         grupo = participant.get("grupo", "N/A")
-        await ctx.send(f"Hola {user_id}, estás en la etapa {etapa} del torneo y tu grupo es el {grupo}.")
+        await ctx.send(f"Hola {fortnite_username}, estás en la etapa {etapa} del torneo y tu grupo es el {grupo}.")
     else:
         await ctx.send("❌ No estás registrado en el torneo.")
 

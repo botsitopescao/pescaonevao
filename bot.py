@@ -140,6 +140,9 @@ def init_db():
         cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS notified_10h BOOLEAN DEFAULT FALSE")
         cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS notified_2h BOOLEAN DEFAULT FALSE")
         cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS target_group INTEGER NOT NULL DEFAULT 0")
+        # Se agregan nuevas columnas para notificaciones de 10 minutos y 2 minutos
+        cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS notified_10m BOOLEAN DEFAULT FALSE")
+        cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS notified_2m BOOLEAN DEFAULT FALSE")
 init_db()
 
 ######################################
@@ -453,7 +456,7 @@ async def crear_evento(ctx, fase: int, grupo: int, date: str, time: str, *, even
         return
     with conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO calendar_events (event_time, description, event_datetime, name, target_stage, target_group, notified_10h, notified_2h) VALUES (%s, %s, %s, %s, %s, %s, FALSE, FALSE)",
+            "INSERT INTO calendar_events (event_time, description, event_datetime, name, target_stage, target_group, notified_10h, notified_2h, notified_10m, notified_2m) VALUES (%s, %s, %s, %s, %s, %s, FALSE, FALSE, FALSE, FALSE)",
             (event_dt, "", event_dt, event_name, fase, grupo)
         )
     await ctx.send(f"✅ Evento '{event_name}' creado para la fase {fase} y grupo {grupo} para el {dt_str}.")
@@ -761,7 +764,7 @@ async def event_notifier():
     while not bot.is_closed():
         now = datetime.datetime.now(tz_peru)
         with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-            cur.execute("SELECT id, name, event_datetime, target_stage, target_group, notified_10h, notified_2h FROM calendar_events")
+            cur.execute("SELECT id, name, event_datetime, target_stage, target_group, notified_10h, notified_2h, notified_10m, notified_2m FROM calendar_events")
             events = cur.fetchall()
         for ev in events:
             event_dt = ev["event_datetime"]
@@ -804,6 +807,44 @@ async def event_notifier():
                         await asyncio.sleep(1)
                 with conn.cursor() as cur:
                     cur.execute("UPDATE calendar_events SET notified_2h = TRUE WHERE id = %s", (ev["id"],))
+            # Notificar 10 minutos antes
+            if diff > 0 and diff <= 10 * 60 and not ev["notified_10m"]:
+                with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+                    cur.execute("SELECT user_id, country FROM registrations WHERE etapa = %s AND grupo = %s", (ev["target_stage"], ev["target_group"]))
+                    users = cur.fetchall()
+                for user_row in users:
+                    user = bot.get_user(int(user_row["user_id"]))
+                    if user is not None:
+                        tz_user = ZoneInfo(country_timezones.get(user_row["country"], "UTC"))
+                        local_dt = event_dt.astimezone(tz_user)
+                        msg = (f"⏰ Faltan 10 minutos para '{ev['name']}', que se realizará el "
+                               f"{local_dt.strftime('%d/%m/%Y %H:%M')} hora {user_row['country']}. Recuerda que si llegas tarde, quedarás automáticamente eliminado del torneo así tengas puntaje alto.")
+                        try:
+                            await user.send(msg)
+                        except Exception as e:
+                            print(f"Error enviando DM de 10 minutos a {user_row['user_id']}: {e}")
+                        await asyncio.sleep(1)
+                with conn.cursor() as cur:
+                    cur.execute("UPDATE calendar_events SET notified_10m = TRUE WHERE id = %s", (ev["id"],))
+            # Notificar 2 minutos antes
+            if diff > 0 and diff <= 2 * 60 and not ev["notified_2m"]:
+                with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+                    cur.execute("SELECT user_id, country FROM registrations WHERE etapa = %s AND grupo = %s", (ev["target_stage"], ev["target_group"]))
+                    users = cur.fetchall()
+                for user_row in users:
+                    user = bot.get_user(int(user_row["user_id"]))
+                    if user is not None:
+                        tz_user = ZoneInfo(country_timezones.get(user_row["country"], "UTC"))
+                        local_dt = event_dt.astimezone(tz_user)
+                        msg = (f"⏰ Faltan 2 minutos para '{ev['name']}', que se realizará el "
+                               f"{local_dt.strftime('%d/%m/%Y %H:%M')} hora {user_row['country']}. Recuerda que si llegas tarde, quedarás automáticamente eliminado del torneo así tengas puntaje alto.")
+                        try:
+                            await user.send(msg)
+                        except Exception as e:
+                            print(f"Error enviando DM de 2 minutos a {user_row['user_id']}: {e}")
+                        await asyncio.sleep(1)
+                with conn.cursor() as cur:
+                    cur.execute("UPDATE calendar_events SET notified_2m = TRUE WHERE id = %s", (ev["id"],))
         await asyncio.sleep(60)
 
 ######################################

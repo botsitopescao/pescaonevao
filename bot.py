@@ -590,7 +590,20 @@ async def trivia(ctx):
         return
     if ctx.channel.id in active_trivia:
         del active_trivia[ctx.channel.id]
-    trivia_item = get_random_trivia()
+    global global_trivias_cache
+    # Cargar la lista de trivias desde la base de datos solo la primera vez.
+    if not global_trivias_cache:
+        if not hasattr(trivia, "initialized"):
+            with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+                cur.execute("SELECT * FROM trivias")
+                rows = cur.fetchall()
+                global_trivias_cache.extend(rows)
+            setattr(trivia, "initialized", True)
+    if global_trivias_cache:
+        index = random.randrange(len(global_trivias_cache))
+        trivia_item = global_trivias_cache.pop(index)
+    else:
+        trivia_item = None
     if trivia_item:
         active_trivia[ctx.channel.id] = {
             "question": trivia_item["question"],
@@ -667,7 +680,7 @@ async def on_message(message):
     if message.author.bot:
         return
 
- # Si el mensaje es un DM y el usuario está en dm_forwarding, reenvía al canal SPECIAL_HELP_CHANNEL.
+    # Si el mensaje es un DM y el usuario está en dm_forwarding, reenvía al canal SPECIAL_HELP_CHANNEL.
     if message.guild is None:
         if message.author.id in dm_forwarding:
             end_time = dm_forwarding[message.author.id]

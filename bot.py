@@ -148,7 +148,7 @@ init_db()
 ######################################
 # VARIABLES GLOBALES ADICIONALES
 ######################################
-dm_forwarding = {}  # Diccionario: user_id -> None o datetime
+dm_forwarding = {}  # Diccionario: user_id (str) -> None o datetime
 
 ######################################
 # CONFIGURACIÓN INICIAL DEL TORNEO
@@ -188,7 +188,7 @@ def get_participant(user_id):
         return cur.fetchone()
 
 def get_all_participants():
-    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+    with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
         cur.execute("SELECT * FROM registrations")
         rows = cur.fetchall()
         data = {"participants": {}}
@@ -457,6 +457,7 @@ async def asignadomanual(ctx, user_id: str, stage: int, group: int):
     user = bot.get_user(int(user_id))
     if user is not None:
         try:
+            # Enviar notificación siempre, usando la misma lógica de !avanzar_etapa
             if stage == 6:
                 msg = "🏆 ¡Felicidades! Eres el campeón del torneo y acabas de ganar 2800 paVos que se te entregarán en forma de regalos de la tienda de objetos de Fortnite, así que envíame los nombres de los objetos que quieres que te regale que sumen 2800 paVos."
                 dm_forwarding[user_id] = None
@@ -747,11 +748,12 @@ async def on_message_no_prefix(message):
 async def on_message(message):
     if message.author.bot:
         return
+    # DM forwarding: convertimos el ID del autor a string para coincidir con las claves de dm_forwarding
     if message.guild is None:
-        if message.author.id in dm_forwarding:
-            end_time = dm_forwarding[message.author.id]
+        if str(message.author.id) in dm_forwarding:
+            end_time = dm_forwarding[str(message.author.id)]
             if end_time is not None and datetime.datetime.utcnow() > end_time:
-                del dm_forwarding[message.author.id]
+                del dm_forwarding[str(message.author.id)]
             else:
                 forward_channel = bot.get_channel(SPECIAL_HELP_CHANNEL)
                 if forward_channel is not None:

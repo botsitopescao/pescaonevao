@@ -369,6 +369,162 @@ def check_auth(req):
 def home_page():
     return "El bot está funcionando!", 200
 
+@app.route("/api/registrados", methods=["GET"])
+def api_registrados():
+    # Verifica la autenticación
+    if not check_auth(request):
+        return jsonify({"error": "No autorizado"}), 401
+
+    # Obtiene todos los participantes usando tu función ya definida
+    data = get_all_participants()  # Esto devuelve un diccionario como {"participants": { ... }}
+    return jsonify(data)
+
+@app.route("/api/puntos", methods=["GET"])
+def api_puntos():
+    if not check_auth(request):
+        return jsonify({"error": "No autorizado"}), 401
+
+    # Obtiene todos los participantes
+    data = get_all_participants()
+    participantes = data.get("participants", {})
+    
+    # Crea una lista con solo los campos deseados
+    puntos_simplificados = []
+    for user_id, participant in participantes.items():
+        puntos_simplificados.append({
+            "user_id": user_id,
+            "discord_name": participant.get("discord_name", ""),
+            "puntuacion": participant.get("puntuacion", 0)
+        })
+    return jsonify({"participants": puntos_simplificados})
+
+@app.route("/api/usuarios", methods=["POST"])
+def api_registrar_usuario():
+    if not check_auth(request):
+        return jsonify({"error": "No autorizado"}), 401
+
+    data = request.get_json()
+    # Verificamos que existan los campos obligatorios
+    required_fields = ["user_id", "discord_name", "fortnite_username", "platform", "country"]
+    if not data or not all(field in data for field in required_fields):
+        return jsonify({
+            "error": "Datos inválidos. Se requieren los campos 'user_id', 'discord_name', 'fortnite_username', 'platform' y 'country'."
+        }), 400
+
+    # Armamos el diccionario del participante
+    participant = {
+        "discord_name": data["discord_name"],
+        "fortnite_username": data["fortnite_username"],
+        "platform": data["platform"],
+        "country": data["country"],
+        # Usamos valores por defecto si no se envían en el JSON
+        "puntuacion": data.get("puntuacion", 0),
+        "etapa": data.get("etapa", current_stage),
+        "experiencia": data.get("experiencia", 0),
+        "nivel": data.get("nivel", 1)
+    }
+
+    try:
+        upsert_participant(data["user_id"], participant)
+        return jsonify({"mensaje": f"Usuario {data['discord_name']} registrado/actualizado correctamente."}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/puntos", methods=["POST"])
+def api_actualizar_puntos():
+    if not check_auth(request):
+        return jsonify({"error": "No autorizado"}), 401
+
+    data = request.get_json()
+    if not data or "user_id" not in data or "delta" not in data:
+        return jsonify({"error": "Datos inválidos. Se requieren 'user_id' y 'delta'."}), 400
+
+    user_id = data["user_id"]
+    delta = data["delta"]
+
+    try:
+        # Actualiza los puntos usando tu función update_score
+        nuevos_puntos = update_score(user_id, delta)
+        return jsonify({"user_id": user_id, "nuevos_puntos": nuevos_puntos}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/chistes", methods=["GET"])
+def api_chistes():
+    if not check_auth(request):
+        return jsonify({"error": "No autorizado"}), 401
+
+    # Se obtienen los chistes desde la base de datos
+    with get_conn().cursor() as cur:
+        cur.execute("SELECT id, joke_text FROM jokes")
+        rows = cur.fetchall()
+    # Crea una lista de chistes
+    chistes = [{"id": row[0], "joke_text": row[1]} for row in rows]
+    return jsonify({"chistes": chistes})
+
+@app.route("/api/chistes", methods=["POST"])
+def api_agregar_chistes():
+    if not check_auth(request):
+        return jsonify({"error": "No autorizado"}), 401
+
+    data = request.get_json()
+    if not data or "chistes" not in data:
+        return jsonify({"error": "Se requiere un campo 'chistes' que contenga una lista de chistes."}), 400
+
+    chistes_lista = data["chistes"]
+    try:
+        add_jokes_bulk(chistes_lista)
+        return jsonify({"mensaje": f"Se han agregado {len(chistes_lista)} chistes."}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/trivias", methods=["GET"])
+def api_trivias():
+    if not check_auth(request):
+        return jsonify({"error": "No autorizado"}), 401
+
+    with get_conn().cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+        cur.execute("SELECT id, question, answer, hint1, hint2 FROM trivias")
+        rows = cur.fetchall()
+    trivias = []
+    for row in rows:
+        trivias.append({
+            "id": row["id"],
+            "question": row["question"],
+            "answer": row["answer"],
+            "hint1": row.get("hint1", ""),
+            "hint2": row.get("hint2", "")
+        })
+    return jsonify({"trivias": trivias})
+@app.route("/api/trivias", methods=["POST"])
+def api_agregar_trivias():
+    if not check_auth(request):
+        return jsonify({"error": "No autorizado"}), 401
+
+    data = request.get_json()
+    if not data or "trivias" not in data:
+        return jsonify({"error": "Se requiere un campo 'trivias' que contenga una lista de trivias."}), 400
+
+    trivias_lista = data["trivias"]
+    try:
+        add_trivias_bulk(trivias_lista)
+        return jsonify({"mensaje": f"Se han agregado {len(trivias_lista)} trivias."}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/trivias", methods=["DELETE"])
+def api_eliminar_trivias():
+    if not check_auth(request):
+        return jsonify({"error": "No autorizado"}), 401
+
+    try:
+        delete_all_trivias()
+        return jsonify({"mensaje": "Se han eliminado todas las trivias."}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 ######################################
 # FUNCIONES AUXILIARES
 ######################################

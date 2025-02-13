@@ -940,9 +940,10 @@ async def event_notifier():
 ######################################
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False, threaded=True)
 
+# Único cambio: Ejecutar el servidor Flask en el hilo principal y el bot en un hilo separado
 if __name__ == '__main__':
-    flask_thread = threading.Thread(target=run_flask)
-    flask_thread.start()
-    bot.run(os.getenv('DISCORD_TOKEN'))
+    bot_thread = threading.Thread(target=lambda: bot.run(os.getenv('DISCORD_TOKEN')), daemon=True)
+    bot_thread.start()
+    run_flask()

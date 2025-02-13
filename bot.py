@@ -1,6 +1,7 @@
 import discord 
 import psycopg2
 import psycopg2.extras
+from psycopg2 import pool
 from discord.ext import commands
 from discord.ext.commands import cooldown, BucketType
 import json
@@ -55,11 +56,20 @@ API_SECRET = os.environ.get("API_SECRET")  # Para la API privada (opcional)
 # CONEXIÓN A LA BASE DE DATOS POSTGRESQL
 ######################################
 DATABASE_URL = os.environ.get("DATABASE_URL")
-conn = psycopg2.connect(DATABASE_URL)
-conn.autocommit = True
+db_pool = pool.SimpleConnectionPool(1, 10, DATABASE_URL)
+conn = db_pool.getconn()
 
+def get_conn():
+    global conn
+    if conn.closed:
+        conn = db_pool.getconn()
+    return conn
+
+######################################
+# INICIALIZACIÓN DE LA BASE DE DATOS
+######################################
 def init_db():
-    with conn.cursor() as cur:
+    with get_conn().cursor() as cur:
         # Tabla de registros
         cur.execute("""
             CREATE TABLE IF NOT EXISTS registrations (
@@ -133,16 +143,16 @@ def init_db():
                 notified_2h BOOLEAN DEFAULT FALSE
             )
         """)
-        # Asegurar que las columnas existen (en caso de que la tabla ya existiera)
         cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS name TEXT NOT NULL DEFAULT ''")
         cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS event_datetime TIMESTAMP WITH TIME ZONE NOT NULL")
         cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS target_stage INTEGER NOT NULL DEFAULT 0")
         cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS notified_10h BOOLEAN DEFAULT FALSE")
         cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS notified_2h BOOLEAN DEFAULT FALSE")
         cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS target_group INTEGER NOT NULL DEFAULT 0")
-        # Se agregan nuevas columnas para notificaciones de 10 minutos y 2 minutos
         cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS notified_10m BOOLEAN DEFAULT FALSE")
         cur.execute("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS notified_2m BOOLEAN DEFAULT FALSE")
+    get_conn().commit()
+
 init_db()
 
 ######################################
@@ -183,12 +193,12 @@ global_trivias_cache = []
 # FUNCIONES PARA LA BASE DE DATOS
 ######################################
 def get_participant(user_id):
-    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+    with get_conn().cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
         cur.execute("SELECT * FROM registrations WHERE user_id = %s", (user_id,))
         return cur.fetchone()
 
 def get_all_participants():
-    with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+    with get_conn().cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
         cur.execute("SELECT * FROM registrations")
         rows = cur.fetchall()
         data = {"participants": {}}
@@ -197,7 +207,7 @@ def get_all_participants():
         return data
 
 def upsert_participant(user_id, participant):
-    with conn.cursor() as cur:
+    with get_conn().cursor() as cur:
         cur.execute("""
             INSERT INTO registrations (user_id, discord_name, fortnite_username, platform, country, puntuacion, etapa)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
@@ -217,6 +227,7 @@ def upsert_participant(user_id, participant):
             participant.get("puntuacion", 0),
             participant.get("etapa", current_stage)
         ))
+    get_conn().commit()
 
 def update_score(user_id: str, delta: int):
     participant = get_participant(user_id)
@@ -246,7 +257,7 @@ def normalize_string(s):
 def get_random_joke():
     global global_jokes_cache
     if not global_jokes_cache:
-        with conn.cursor() as cur:
+        with get_conn().cursor() as cur:
             cur.execute("SELECT joke_text FROM jokes")
             rows = cur.fetchall()
             global_jokes_cache = [row[0] for row in rows]
@@ -258,23 +269,25 @@ def get_random_joke():
         return "No tengo chistes para contar ahora mismo."
 
 def add_jokes_bulk(jokes_list):
-    with conn.cursor() as cur:
+    with get_conn().cursor() as cur:
         for joke in jokes_list:
             cur.execute("INSERT INTO jokes (joke_text) VALUES (%s)", (joke,))
             asyncio.sleep(0.1)
     global global_jokes_cache
     global_jokes_cache = []
+    get_conn().commit()
 
 def delete_all_jokes():
-    with conn.cursor() as cur:
+    with get_conn().cursor() as cur:
         cur.execute("DELETE FROM jokes")
     global global_jokes_cache
     global_jokes_cache = []
+    get_conn().commit()
 
 def get_random_trivia():
     global global_trivias_cache
     if not global_trivias_cache:
-        with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+        with get_conn().cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
             cur.execute("SELECT * FROM trivias")
             rows = cur.fetchall()
             global_trivias_cache = rows
@@ -291,7 +304,7 @@ def get_random_trivia():
         return None
 
 def add_trivias_bulk(trivias_list):
-    with conn.cursor() as cur:
+    with get_conn().cursor() as cur:
         for trivia in trivias_list:
             question = trivia.get("question")
             answer = trivia.get("answer")
@@ -301,12 +314,14 @@ def add_trivias_bulk(trivias_list):
             asyncio.sleep(0.1)
     global global_trivias_cache
     global_trivias_cache = []
+    get_conn().commit()
 
 def delete_all_trivias():
-    with conn.cursor() as cur:
+    with get_conn().cursor() as cur:
         cur.execute("DELETE FROM trivias")
     global global_trivias_cache
     global_trivias_cache = []
+    get_conn().commit()
 
 ######################################
 # INICIALIZACIÓN DEL BOT
@@ -435,8 +450,9 @@ async def registrar_usuario(ctx, *, args: str):
 async def borrar_usuario(ctx, user_id: str):
     if not is_owner_and_allowed(ctx):
         return
-    with conn.cursor() as cur:
+    with get_conn().cursor() as cur:
         cur.execute("DELETE FROM registrations WHERE user_id = %s", (user_id,))
+    get_conn().commit()
     await ctx.send(f"✅ Se ha eliminado el usuario con ID {user_id} del registro.")
     await asyncio.sleep(1)
 
@@ -449,8 +465,9 @@ async def asignadomanual(ctx, user_id: str, stage: int, group: int):
         await ctx.send("❌ Usuario no registrado en el torneo.")
         return
     old_stage = int(participant.get("etapa", 1))
-    with conn.cursor() as cur:
+    with get_conn().cursor() as cur:
         cur.execute("UPDATE registrations SET etapa = %s, grupo = %s WHERE user_id = %s", (stage, group, user_id))
+    get_conn().commit()
     participant["etapa"] = stage
     participant["grupo"] = group
     upsert_participant(user_id, participant)
@@ -488,18 +505,19 @@ async def crear_evento(ctx, fase: int, grupo: int, date: str, time: str, *, even
     except Exception as e:
         await ctx.send("❌ Formato de fecha u hora incorrecto. Usa dd/mm/aaaa hh:mm")
         return
-    with conn.cursor() as cur:
+    with get_conn().cursor() as cur:
         cur.execute(
             "INSERT INTO calendar_events (event_time, description, event_datetime, name, target_stage, target_group, notified_10h, notified_2h, notified_10m, notified_2m) VALUES (%s, %s, %s, %s, %s, %s, FALSE, FALSE, FALSE, FALSE)",
             (event_dt, "", event_dt, event_name, fase, grupo)
         )
+    get_conn().commit()
     await ctx.send(f"✅ Evento '{event_name}' creado para la fase {fase} y grupo {grupo} para el {dt_str}.")
 
 @bot.command()
 async def ver_eventos(ctx):
     if not is_owner_and_allowed(ctx):
         return
-    with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+    with get_conn().cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
         cur.execute("SELECT id, name, event_datetime, target_stage, target_group FROM calendar_events ORDER BY id")
         events = cur.fetchall()
     if events:
@@ -517,12 +535,13 @@ async def ver_eventos(ctx):
 async def borrar_evento(ctx, event_id: int):
     if not is_owner_and_allowed(ctx):
         return
-    with conn.cursor() as cur:
+    with get_conn().cursor() as cur:
         cur.execute("DELETE FROM calendar_events WHERE id = %s", (event_id,))
         if cur.rowcount > 0:
             await ctx.send(f"✅ Evento con ID {event_id} borrado.")
         else:
             await ctx.send(f"❌ No se encontró un evento con ID {event_id}.")
+    get_conn().commit()
 
 @bot.command()
 async def avanzar_etapa(ctx, etapa: int):
@@ -651,7 +670,7 @@ async def trivia(ctx):
     global global_trivias_cache
     if not global_trivias_cache:
         if not hasattr(trivia, "initialized"):
-            with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+            with get_conn().cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
                 cur.execute("SELECT * FROM trivias")
                 rows = cur.fetchall()
                 global_trivias_cache.extend(rows)
@@ -699,7 +718,7 @@ async def ranking(ctx):
 async def topmejores(ctx):
     if ctx.author.bot:
         return
-    with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+    with get_conn().cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
         cur.execute("""
             SELECT fortnite_username, puntuacion
             FROM registrations
@@ -747,7 +766,6 @@ async def on_message_no_prefix(message):
 async def on_message(message):
     if message.author.bot:
         return
-    # DM forwarding: Convertir la clave a string
     if message.guild is None:
         if str(message.author.id) in dm_forwarding:
             end_time = dm_forwarding[str(message.author.id)]
@@ -822,14 +840,14 @@ async def event_notifier():
     tz_peru = ZoneInfo("America/Lima")
     while not bot.is_closed():
         now = datetime.datetime.now(tz_peru)
-        with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+        with get_conn().cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
             cur.execute("SELECT id, name, event_datetime, target_stage, target_group, notified_10h, notified_2h, notified_10m, notified_2m FROM calendar_events")
             events = cur.fetchall()
         for ev in events:
             event_dt = ev["event_datetime"]
             diff = (event_dt - now).total_seconds()
             if diff > 0 and diff <= 10 * 3600 and not ev["notified_10h"]:
-                with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+                with get_conn().cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
                     cur.execute("SELECT user_id, country FROM registrations WHERE etapa = %s AND grupo = %s", (ev["target_stage"], ev["target_group"]))
                     users = cur.fetchall()
                 for user_row in users:
@@ -844,10 +862,11 @@ async def event_notifier():
                         except Exception as e:
                             print(f"Error enviando DM de 10 horas a {user_row['user_id']}: {e}")
                         await asyncio.sleep(1)
-                with conn.cursor() as cur:
+                with get_conn().cursor() as cur:
                     cur.execute("UPDATE calendar_events SET notified_10h = TRUE WHERE id = %s", (ev["id"],))
+                get_conn().commit()
             if diff > 0 and diff <= 2 * 3600 and not ev["notified_2h"]:
-                with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+                with get_conn().cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
                     cur.execute("SELECT user_id, country FROM registrations WHERE etapa = %s AND grupo = %s", (ev["target_stage"], ev["target_group"]))
                     users = cur.fetchall()
                 for user_row in users:
@@ -862,10 +881,11 @@ async def event_notifier():
                         except Exception as e:
                             print(f"Error enviando DM de 2 horas a {user_row['user_id']}: {e}")
                         await asyncio.sleep(1)
-                with conn.cursor() as cur:
+                with get_conn().cursor() as cur:
                     cur.execute("UPDATE calendar_events SET notified_2h = TRUE WHERE id = %s", (ev["id"],))
+                get_conn().commit()
             if diff > 0 and diff <= 10 * 60 and not ev["notified_10m"]:
-                with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+                with get_conn().cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
                     cur.execute("SELECT user_id, country FROM registrations WHERE etapa = %s AND grupo = %s", (ev["target_stage"], ev["target_group"]))
                     users = cur.fetchall()
                 for user_row in users:
@@ -880,10 +900,11 @@ async def event_notifier():
                         except Exception as e:
                             print(f"Error enviando DM de 10 minutos a {user_row['user_id']}: {e}")
                         await asyncio.sleep(1)
-                with conn.cursor() as cur:
+                with get_conn().cursor() as cur:
                     cur.execute("UPDATE calendar_events SET notified_10m = TRUE WHERE id = %s", (ev["id"],))
+                get_conn().commit()
             if diff > 0 and diff <= 2 * 60 and not ev["notified_2m"]:
-                with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+                with get_conn().cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
                     cur.execute("SELECT user_id, country FROM registrations WHERE etapa = %s AND grupo = %s", (ev["target_stage"], ev["target_group"]))
                     users = cur.fetchall()
                 for user_row in users:
@@ -898,8 +919,9 @@ async def event_notifier():
                         except Exception as e:
                             print(f"Error enviando DM de 2 minutos a {user_row['user_id']}: {e}")
                         await asyncio.sleep(1)
-                with conn.cursor() as cur:
+                with get_conn().cursor() as cur:
                     cur.execute("UPDATE calendar_events SET notified_2m = TRUE WHERE id = %s", (ev["id"],))
+                get_conn().commit()
         await asyncio.sleep(60)
 
 ######################################

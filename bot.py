@@ -15,6 +15,7 @@ import datetime
 from flask import Flask, request, jsonify
 from zoneinfo import ZoneInfo
 import urllib.parse  # para parsear la URL de la base de datos
+from PIL import Image, ImageDraw, ImageFont  # Requiere instalar Pillow (pip install Pillow)
 
 # Mapeo de países a zonas horarias
 country_timezones = {
@@ -90,6 +91,9 @@ def init_db():
         cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS puntuacion INTEGER DEFAULT 0")
         cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS etapa INTEGER DEFAULT 1")
         cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS grupo INTEGER DEFAULT 0")
+        # Agregamos columnas para experiencia y nivel (MINIJUEGO DE SUBIR DE NIVEL)
+        cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS experiencia INTEGER DEFAULT 0")
+        cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS nivel INTEGER DEFAULT 1")
         
         # Tabla de chistes
         cur.execute("""
@@ -210,15 +214,17 @@ def get_all_participants():
 def upsert_participant(user_id, participant):
     with get_conn().cursor() as cur:
         cur.execute("""
-            INSERT INTO registrations (user_id, discord_name, fortnite_username, platform, country, puntuacion, etapa)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO registrations (user_id, discord_name, fortnite_username, platform, country, puntuacion, etapa, experiencia, nivel)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (user_id) DO UPDATE SET
                 discord_name = EXCLUDED.discord_name,
                 fortnite_username = EXCLUDED.fortnite_username,
                 platform = EXCLUDED.platform,
                 country = EXCLUDED.country,
                 puntuacion = EXCLUDED.puntuacion,
-                etapa = EXCLUDED.etapa
+                etapa = EXCLUDED.etapa,
+                experiencia = EXCLUDED.experiencia,
+                nivel = EXCLUDED.nivel
         """, (
             user_id,
             participant["discord_name"],
@@ -226,7 +232,9 @@ def upsert_participant(user_id, participant):
             participant.get("platform", ""),
             participant.get("country", ""),
             participant.get("puntuacion", 0),
-            participant.get("etapa", current_stage)
+            participant.get("etapa", current_stage),
+            participant.get("experiencia", 0),
+            participant.get("nivel", 1)
         ))
     get_conn().commit()
 
@@ -239,7 +247,9 @@ def update_score(user_id: str, delta: int):
             "platform": "",
             "country": "",
             "puntuacion": 0,
-            "etapa": current_stage
+            "etapa": current_stage,
+            "experiencia": 0,
+            "nivel": 1
         }
     new_points = int(participant.get("puntuacion", 0)) + delta
     participant["puntuacion"] = new_points
@@ -441,7 +451,9 @@ async def registrar_usuario(ctx, *, args: str):
         "platform": platform,
         "country": country,
         "puntuacion": 0,
-        "etapa": current_stage
+        "etapa": current_stage,
+        "experiencia": 0,
+        "nivel": 1
     }
     upsert_participant(discord_id, participant)
     await ctx.send(f"✅ Usuario {discord_name} registrado correctamente con Discord ID {discord_id}.")
@@ -711,6 +723,42 @@ async def triviagrupal(ctx):
         await general_channel.send(f"Respuesta correcta, {fortnite_name}, has ganado 15 puntos.")
 
 ######################################
+# COMANDO DE MINIJUEGO DE SUBIR DE NIVEL
+######################################
+@bot.command()
+async def minivel(ctx):
+    user_id = str(ctx.author.id)
+    participant = get_participant(user_id)
+    if participant is None:
+        await ctx.send("No estás registrado en el sistema de niveles.")
+        return
+    fortnite_name = participant.get("fortnite_username", ctx.author.display_name)
+    nivel = participant.get("nivel", 1)
+    experiencia = participant.get("experiencia", 0)
+    threshold = nivel * 100
+    ratio = experiencia / threshold if threshold > 0 else 0
+    # Crear imagen con la información de nivel
+    img = Image.new("RGB", (400, 120), color=(255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    font = ImageFont.load_default()
+    draw.text((10, 10), f"{fortnite_name}", fill=(0, 0, 0), font=font)
+    draw.text((300, 10), f"Nivel {nivel}", fill=(0, 0, 0), font=font)
+    bar_x = 10
+    bar_y = 60
+    bar_width = 380
+    bar_height = 30
+    draw.rectangle([bar_x, bar_y, bar_x+bar_width, bar_y+bar_height], fill=(200, 200, 200))
+    fill_width = int(bar_width * ratio)
+    draw.rectangle([bar_x, bar_y, bar_x+fill_width, bar_y+bar_height], fill=(100, 100, 255))
+    draw.text((bar_x+10, bar_y+5), f"{experiencia}/{threshold} XP", fill=(0, 0, 0), font=font)
+    import io
+    bio = io.BytesIO()
+    img.save(bio, format="PNG")
+    bio.seek(0)
+    file = discord.File(fp=bio, filename="minivel.png")
+    await ctx.send(file=file)
+
+######################################
 # COMANDOS COMUNES (DISPONIBLES PARA TODOS)
 ######################################
 @bot.command()
@@ -807,18 +855,45 @@ async def on_message_no_prefix(message):
     if message.content.startswith(PREFIX):
         return
     content = message.content.lower().strip()
-    if content in ('trivia', 'chiste', 'ranking', 'topmejores', 'vermigrupo'):
+    if content in ('trivia', 'chiste', 'ranking', 'topmejores', 'vermigrupo', 'minivel'):
         message.content = PREFIX + content
         ctx = await bot.get_context(message)
         await bot.invoke(ctx)
 
 ######################################
-# EVENTO ON_MESSAGE (DM FORWARDING Y RESPUESTAS DE TRIVIA)
+# EVENTO ON_MESSAGE (DM FORWARDING, RESPUESTAS DE TRIVIA Y SISTEMA DE NIVEL)
 ######################################
 @bot.event
 async def on_message(message):
     if message.author.bot:
         return
+
+    ######################################
+    # MINIJUEGO DE SUBIR DE NIVEL
+    ######################################
+    if message.guild is not None:
+        participant = get_participant(str(message.author.id))
+        if participant is not None:
+            try:
+                current_exp = participant.get("experiencia", 0)
+                current_level = participant.get("nivel", 1)
+                new_exp = current_exp + 5  # Se suma 5 XP por mensaje
+                leveled_up = False
+                threshold = current_level * 100
+                while new_exp >= threshold:
+                    new_exp -= threshold
+                    current_level += 1
+                    threshold = current_level * 100
+                    leveled_up = True
+                participant["experiencia"] = new_exp
+                participant["nivel"] = current_level
+                upsert_participant(str(message.author.id), participant)
+                if leveled_up:
+                    await message.channel.send(f"{message.author.display_name} subiste de nivel")
+                    await asyncio.sleep(0.1)
+            except Exception as e:
+                print(f"Error actualizando nivel para {message.author.id}: {e}")
+
     if message.guild is None:
         if str(message.author.id) in dm_forwarding:
             end_time = dm_forwarding[str(message.author.id)]

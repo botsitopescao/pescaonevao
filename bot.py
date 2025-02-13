@@ -15,6 +15,7 @@ import datetime
 from flask import Flask, request, jsonify
 from zoneinfo import ZoneInfo
 import urllib.parse  # para parsear la URL de la base de datos
+from waitress import serve  # Único cambio: usar waitress para servir Flask
 
 # Mapeo de países a zonas horarias
 country_timezones = {
@@ -940,9 +941,10 @@ async def event_notifier():
 ######################################
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False, threaded=True)
+    print(f"Starting Flask server on port {port}")
+    serve(app, host="0.0.0.0", port=port)
 
-# Único cambio: Ejecutar el servidor Flask en el hilo principal y el bot en un hilo separado
+# Único cambio: Ejecutar el servidor Flask en el proceso principal usando waitress, y el bot en un hilo separado.
 if __name__ == '__main__':
     bot_thread = threading.Thread(target=lambda: bot.run(os.getenv('DISCORD_TOKEN')), daemon=True)
     bot_thread.start()

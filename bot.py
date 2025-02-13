@@ -517,6 +517,12 @@ async def crear_evento(ctx, fase: int, grupo: int, date: str, time: str, *, even
 async def ver_eventos(ctx):
     if not is_owner_and_allowed(ctx):
         return
+    # Se obtiene la zona horaria registrada del usuario; si no se encuentra, se usa la hora de Perú
+    participant = get_participant(str(ctx.author.id))
+    if participant and participant.get("country"):
+        user_tz = ZoneInfo(country_timezones.get(participant.get("country"), "America/Lima"))
+    else:
+        user_tz = ZoneInfo("America/Lima")
     with get_conn().cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
         cur.execute("SELECT id, name, event_datetime, target_stage, target_group FROM calendar_events ORDER BY id")
         events = cur.fetchall()
@@ -524,8 +530,10 @@ async def ver_eventos(ctx):
         lines = ["**Eventos en el Calendario:**"]
         for ev in events:
             dt = ev["event_datetime"]
-            date_str = dt.strftime("%d/%m/%Y")
-            time_str = dt.strftime("%H:%M")
+            # Convertir la hora del evento (almacenada en hora peruana) a la zona horaria del usuario
+            dt_converted = dt.astimezone(user_tz)
+            date_str = dt_converted.strftime("%d/%m/%Y")
+            time_str = dt_converted.strftime("%H:%M")
             lines.append(f"ID: {ev['id']} - {date_str} {time_str} - {ev['name']} - Fase: {ev['target_stage']} - Grupo: {ev['target_group']}")
         await ctx.send("\n".join(lines))
     else:
@@ -614,6 +622,9 @@ async def avanzar_etapa(ctx, etapa: int):
         await ctx.send(f"❌ La etapa {etapa} no está definida en STAGES.")
         await asyncio.sleep(1)
 
+######################################
+# COMANDOS MASIVOS DE CHISTES Y TRIVIAS
+######################################
 @bot.command()
 async def agregar_chistes_masivos(ctx, *, chistes_texto: str):
     if not is_owner_and_allowed(ctx):

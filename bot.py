@@ -369,26 +369,27 @@ def check_auth(req):
 def home_page():
     return "El bot está funcionando!", 200
 
+######################################
+# ENDPOINTS DE LA API REST
+######################################
+
+# 1. Gestión de Usuarios
+
+# a) Consultar la lista completa de registros
 @app.route("/api/registrados", methods=["GET"])
 def api_registrados():
-    # Verifica la autenticación
     if not check_auth(request):
         return jsonify({"error": "No autorizado"}), 401
-
-    # Obtiene todos los participantes usando tu función ya definida
-    data = get_all_participants()  # Esto devuelve un diccionario como {"participants": { ... }}
+    data = get_all_participants()  # Devuelve un diccionario con la clave "participants"
     return jsonify(data)
 
+# b) Consultar una lista "simplificada" (por ejemplo, solo user_id, discord_name y puntuacion)
 @app.route("/api/puntos", methods=["GET"])
 def api_puntos():
     if not check_auth(request):
         return jsonify({"error": "No autorizado"}), 401
-
-    # Obtiene todos los participantes
     data = get_all_participants()
     participantes = data.get("participants", {})
-    
-    # Crea una lista con solo los campos deseados
     puntos_simplificados = []
     for user_id, participant in participantes.items():
         puntos_simplificados.append({
@@ -398,26 +399,24 @@ def api_puntos():
         })
     return jsonify({"participants": puntos_simplificados})
 
+# c) Agregar o actualizar (upsert) un usuario
 @app.route("/api/usuarios", methods=["POST"])
 def api_registrar_usuario():
     if not check_auth(request):
         return jsonify({"error": "No autorizado"}), 401
 
     data = request.get_json()
-    # Verificamos que existan los campos obligatorios
     required_fields = ["user_id", "discord_name", "fortnite_username", "platform", "country"]
     if not data or not all(field in data for field in required_fields):
         return jsonify({
             "error": "Datos inválidos. Se requieren los campos 'user_id', 'discord_name', 'fortnite_username', 'platform' y 'country'."
         }), 400
 
-    # Armamos el diccionario del participante
     participant = {
         "discord_name": data["discord_name"],
         "fortnite_username": data["fortnite_username"],
         "platform": data["platform"],
         "country": data["country"],
-        # Usamos valores por defecto si no se envían en el JSON
         "puntuacion": data.get("puntuacion", 0),
         "etapa": data.get("etapa", current_stage),
         "experiencia": data.get("experiencia", 0),
@@ -430,26 +429,7 @@ def api_registrar_usuario():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
-@app.route("/api/puntos", methods=["POST"])
-def api_actualizar_puntos():
-    if not check_auth(request):
-        return jsonify({"error": "No autorizado"}), 401
-
-    data = request.get_json()
-    if not data or "user_id" not in data or "delta" not in data:
-        return jsonify({"error": "Datos inválidos. Se requieren 'user_id' y 'delta'."}), 400
-
-    user_id = data["user_id"]
-    delta = data["delta"]
-
-    try:
-        # Actualiza los puntos usando tu función update_score
-        nuevos_puntos = update_score(user_id, delta)
-        return jsonify({"user_id": user_id, "nuevos_puntos": nuevos_puntos}), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
+# d) Eliminar un usuario
 @app.route("/api/usuarios/<user_id>", methods=["DELETE"])
 def api_eliminar_usuario(user_id):
     if not check_auth(request):
@@ -464,19 +444,43 @@ def api_eliminar_usuario(user_id):
         return jsonify({"error": str(e)}), 500
 
 
+# 2. Gestión de Puntos
+
+# Actualizar (sumar/restar) puntos de un participante
+@app.route("/api/puntos", methods=["POST"])
+def api_actualizar_puntos():
+    if not check_auth(request):
+        return jsonify({"error": "No autorizado"}), 401
+
+    data = request.get_json()
+    if not data or "user_id" not in data or "delta" not in data:
+        return jsonify({"error": "Datos inválidos. Se requieren 'user_id' y 'delta'."}), 400
+
+    user_id = data["user_id"]
+    delta = data["delta"]
+
+    try:
+        nuevos_puntos = update_score(user_id, delta)
+        return jsonify({"user_id": user_id, "nuevos_puntos": nuevos_puntos}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# 3. Gestión de Chistes
+
+# a) Listar chistes
 @app.route("/api/chistes", methods=["GET"])
 def api_chistes():
     if not check_auth(request):
         return jsonify({"error": "No autorizado"}), 401
 
-    # Se obtienen los chistes desde la base de datos
     with get_conn().cursor() as cur:
         cur.execute("SELECT id, joke_text FROM jokes")
         rows = cur.fetchall()
-    # Crea una lista de chistes
     chistes = [{"id": row[0], "joke_text": row[1]} for row in rows]
     return jsonify({"chistes": chistes})
 
+# b) Agregar chistes en bloque (en masa)
 @app.route("/api/chistes", methods=["POST"])
 def api_agregar_chistes():
     if not check_auth(request):
@@ -493,6 +497,22 @@ def api_agregar_chistes():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# c) Eliminar todos los chistes
+@app.route("/api/chistes", methods=["DELETE"])
+def api_eliminar_chistes():
+    if not check_auth(request):
+        return jsonify({"error": "No autorizado"}), 401
+
+    try:
+        delete_all_jokes()
+        return jsonify({"mensaje": "Se han eliminado todos los chistes."}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# 4. Gestión de Trivias
+
+# a) Listar trivias
 @app.route("/api/trivias", methods=["GET"])
 def api_trivias():
     if not check_auth(request):
@@ -511,6 +531,8 @@ def api_trivias():
             "hint2": row.get("hint2", "")
         })
     return jsonify({"trivias": trivias})
+
+# b) Agregar trivias en bloque (en masa)
 @app.route("/api/trivias", methods=["POST"])
 def api_agregar_trivias():
     if not check_auth(request):
@@ -527,6 +549,7 @@ def api_agregar_trivias():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# c) Eliminar todas las trivias
 @app.route("/api/trivias", methods=["DELETE"])
 def api_eliminar_trivias():
     if not check_auth(request):
@@ -537,7 +560,6 @@ def api_eliminar_trivias():
         return jsonify({"mensaje": "Se han eliminado todas las trivias."}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 
 ######################################
 # FUNCIONES AUXILIARES

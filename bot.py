@@ -450,6 +450,20 @@ def api_actualizar_puntos():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/usuarios/<user_id>", methods=["DELETE"])
+def api_eliminar_usuario(user_id):
+    if not check_auth(request):
+        return jsonify({"error": "No autorizado"}), 401
+
+    try:
+        with get_conn().cursor() as cur:
+            cur.execute("DELETE FROM registrations WHERE user_id = %s", (user_id,))
+        get_conn().commit()
+        return jsonify({"mensaje": f"Usuario con ID {user_id} eliminado."}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/chistes", methods=["GET"])
 def api_chistes():
     if not check_auth(request):

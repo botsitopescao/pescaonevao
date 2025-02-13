@@ -49,6 +49,7 @@ OWNER_ID = 1336609089656197171         # Tu Discord ID (único autorizado para c
 PUBLIC_CHANNEL_ID  = 1338126297666424874
 SPECIAL_HELP_CHANNEL = 1338747286901100554
 GUILD_ID = 1337387112403697694
+GENERAL_CHANNEL_ID = 1337387113444020257
 
 API_SECRET = os.environ.get("API_SECRET")  # Para la API privada (opcional)
 
@@ -491,9 +492,6 @@ async def asignadomanual(ctx, user_id: str, stage: int, group: int):
     await ctx.send(f"✅ Usuario {user_id} asignado a la etapa {stage} y grupo {group}.")
     await asyncio.sleep(1)
 
-######################################
-# COMANDOS DE EVENTOS (SOLO OWNER_ID) - NUEVOS COMANDOS
-######################################
 @bot.command(aliases=["agregar_evento"])
 async def crear_evento(ctx, fase: int, grupo: int, date: str, time: str, *, event_name: str):
     if not is_owner_and_allowed(ctx):
@@ -667,6 +665,50 @@ async def eliminar_todas_trivias(ctx):
     delete_all_trivias()
     await ctx.send("✅ Se han eliminado todas las trivias de la base de datos.")
     await asyncio.sleep(1)
+
+@bot.command()
+async def triviagrupal(ctx):
+    if ctx.author.id != OWNER_ID:
+        return
+    trivia_item = get_random_trivia()
+    if not trivia_item:
+        await ctx.send("No hay trivias disponibles.")
+        return
+    question = trivia_item["question"]
+    answer = trivia_item["answer"]
+    hint1 = trivia_item.get("hint1", "")
+    hint2 = trivia_item.get("hint2", "")
+    normalized_answer = normalize_string(answer)
+    general_channel = bot.get_channel(GENERAL_CHANNEL_ID)
+    if general_channel is None:
+        await ctx.send("No se encontró el canal general.")
+        return
+    await general_channel.send(f"**Trivia Grupal:** {question}")
+    
+    def check(m):
+        return m.channel.id == GENERAL_CHANNEL_ID and not m.author.bot and normalize_string(m.content) == normalized_answer
+
+    answered = False
+    try:
+        msg = await bot.wait_for("message", timeout=2, check=check)
+        answered = True
+    except asyncio.TimeoutError:
+        await general_channel.send(f"Pista: {hint1}")
+        try:
+            msg = await bot.wait_for("message", timeout=3, check=check)
+            answered = True
+        except asyncio.TimeoutError:
+            await general_channel.send(f"Otra pista: {hint2}")
+            try:
+                msg = await bot.wait_for("message", timeout=3, check=check)
+                answered = True
+            except asyncio.TimeoutError:
+                await general_channel.send("Nadie reespondió correctamente")
+    if answered:
+        participant = get_participant(str(msg.author.id))
+        fortnite_name = participant["fortnite_username"] if participant and participant.get("fortnite_username") else msg.author.name
+        update_score(str(msg.author.id), 15)
+        await general_channel.send(f"Respuesta correcta, {fortnite_name}, has ganado 15 puntos.")
 
 ######################################
 # COMANDOS COMUNES (DISPONIBLES PARA TODOS)

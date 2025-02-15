@@ -6,3 +6,4 @@ psycopg2
 asyncio
 datetime
 Pillow
+waitress

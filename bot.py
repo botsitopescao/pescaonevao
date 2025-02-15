@@ -77,6 +77,7 @@ def get_db_cursor():
 def init_db():
     with get_conn().cursor() as cur:
         # Tabla de registros
+        cur.execute("SET statement_timeout = 0;")
         cur.execute("""
             CREATE TABLE IF NOT EXISTS registrations (
                 user_id TEXT PRIMARY KEY,

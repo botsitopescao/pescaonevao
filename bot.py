@@ -1255,7 +1255,7 @@ async def event_notifier():
 from waitress import serve
 
 def run_flask():
-    port = int(os.environ.get("PORT", 10000))  # Usa 10000 como valor predeterminado, ya que Render lo asigna así por defecto
+    port = int(os.environ.get("PORT", 8080))  # Usa 10000 como valor predeterminado, ya que Render lo asigna así por defecto
     print(f"Iniciando Flask en el puerto {port}")
     serve(app, host="0.0.0.0", port=port)
 

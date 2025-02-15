@@ -58,7 +58,7 @@ API_SECRET = os.environ.get("API_SECRET")  # Para la API privada (opcional)
 # CONEXIÓN A LA BASE DE DATOS POSTGRESQL
 ######################################
 DATABASE_URL = os.environ.get("DATABASE_URL")
-db_pool = pool.SimpleConnectionPool(1, 10, DATABASE_URL)
+db_pool = pool.SimpleConnectionPool(1, 10, DATABASE_URL, options='-4')
 conn = db_pool.getconn()
 
 def get_conn():

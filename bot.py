@@ -1253,7 +1253,7 @@ async def event_notifier():
 # SERVIDOR WEB PARA MANTENER EL BOT ACTIVO (API PRIVADA)
 ######################################
 def run_flask():
-    port = int(os.environ.get("PORT", 8080))
+    port = int(os.environ.get("PORT", 10000))
     print(f"Iniciando Flask en el puerto {port}")
     app.run(host="0.0.0.0", port=port)
 

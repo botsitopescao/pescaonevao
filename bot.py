@@ -1252,15 +1252,17 @@ async def event_notifier():
 ######################################
 # SERVIDOR WEB PARA MANTENER EL BOT ACTIVO (API PRIVADA)
 ######################################
+import time
 from waitress import serve
 
 def run_flask():
-    port = int(os.environ.get("PORT", 8080))  # Usa 10000 como valor predeterminado, ya que Render lo asigna así por defecto
+    port = int(os.environ.get("PORT", 10000))  # Usa 10000 porque es el puerto asignado por defecto en Render
     print(f"Iniciando Flask en el puerto {port}")
     serve(app, host="0.0.0.0", port=port)
-
 
 if __name__ == '__main__':
     flask_thread = threading.Thread(target=run_flask)
     flask_thread.start()
+    # Agrega un retraso para darle tiempo a Waitress de iniciar y abrir el puerto.
+    time.sleep(5)  # Espera 5 segundos
     bot.run(os.getenv('DISCORD_TOKEN'))

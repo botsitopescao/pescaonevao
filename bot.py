@@ -67,6 +67,10 @@ def get_conn():
         conn = db_pool.getconn()
     return conn
 
+def get_db_cursor():
+    return get_conn().cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+
 ######################################
 # INICIALIZACIÓN DE LA BASE DE DATOS
 ######################################

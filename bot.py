@@ -212,10 +212,12 @@ def get_all_participants():
         return data
 
 def upsert_participant(user_id, participant):
-    with get_conn().cursor() as cur:
+    with get_db_cursor() as cur:
         cur.execute("""
-            INSERT INTO registrations (user_id, discord_name, fortnite_username, platform, country, puntuacion, etapa, experiencia, nivel)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO registrations 
+                (user_id, discord_name, fortnite_username, platform, country, puntuacion, etapa, grupo, experiencia, nivel)
+            VALUES 
+                (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (user_id) DO UPDATE SET
                 discord_name = EXCLUDED.discord_name,
                 fortnite_username = EXCLUDED.fortnite_username,
@@ -223,6 +225,7 @@ def upsert_participant(user_id, participant):
                 country = EXCLUDED.country,
                 puntuacion = EXCLUDED.puntuacion,
                 etapa = EXCLUDED.etapa,
+                grupo = EXCLUDED.grupo,
                 experiencia = EXCLUDED.experiencia,
                 nivel = EXCLUDED.nivel
         """, (
@@ -232,11 +235,13 @@ def upsert_participant(user_id, participant):
             participant.get("platform", ""),
             participant.get("country", ""),
             participant.get("puntuacion", 0),
-            participant.get("etapa", current_stage),
+            participant.get("etapa", 1),   # Valor predeterminado para etapa
+            participant.get("grupo", 0),    # Valor predeterminado para grupo
             participant.get("experiencia", 0),
             participant.get("nivel", 1)
         ))
     get_conn().commit()
+
 
 def update_score(user_id: str, delta: int):
     participant = get_participant(user_id)

@@ -620,13 +620,20 @@ async def lista_registrados(ctx):
     data = get_all_participants()
     lines = ["**Lista de Usuarios Registrados:**"]
     for user_id, participant in data["participants"].items():
-        line = (f"Discord: {participant['discord_name']} (ID: {user_id}) | Fortnite: {participant['fortnite_username']} | "
-                f"Plataforma: {participant['platform']} | País: {participant['country']} | Puntos: {participant['puntuacion']} | "
-                f"Etapa: {participant['etapa']} | Grupo: {participant.get('grupo', 'N/A')}")
+        line = (
+            f"Discord: {participant['discord_name']} (ID: {user_id}) | Fortnite: {participant['fortnite_username']} | "
+            f"Plataforma: {participant['platform']} | País: {participant['country']} | Puntos: {participant['puntuacion']} | "
+            f"Etapa: {participant['etapa']} | Grupo: {participant.get('grupo', 'N/A')}"
+        )
         lines.append(line)
     full_message = "\n".join(lines)
-    await ctx.send(full_message)
+    
+    # Dividir el mensaje en fragmentos de hasta 2000 caracteres
+    max_length = 2000
+    for i in range(0, len(full_message), max_length):
+        await ctx.send(full_message[i:i+max_length])
     await asyncio.sleep(1)
+
 
 @bot.command()
 async def registrar_usuario(ctx, *, args: str):

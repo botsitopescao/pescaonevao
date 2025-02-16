@@ -67,17 +67,12 @@ def get_conn():
         conn = db_pool.getconn()
     return conn
 
-def get_db_cursor():
-    return get_conn().cursor(cursor_factory=psycopg2.extras.DictCursor)
-
-
 ######################################
 # INICIALIZACIÓN DE LA BASE DE DATOS
 ######################################
 def init_db():
     with get_conn().cursor() as cur:
         # Tabla de registros
-        cur.execute("SET statement_timeout = 0;")
         cur.execute("""
             CREATE TABLE IF NOT EXISTS registrations (
                 user_id TEXT PRIMARY KEY,
@@ -217,12 +212,10 @@ def get_all_participants():
         return data
 
 def upsert_participant(user_id, participant):
-    with get_db_cursor() as cur:
+    with get_conn().cursor() as cur:
         cur.execute("""
-            INSERT INTO registrations 
-                (user_id, discord_name, fortnite_username, platform, country, puntuacion, etapa, grupo, experiencia, nivel)
-            VALUES 
-                (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO registrations (user_id, discord_name, fortnite_username, platform, country, puntuacion, etapa, experiencia, nivel)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (user_id) DO UPDATE SET
                 discord_name = EXCLUDED.discord_name,
                 fortnite_username = EXCLUDED.fortnite_username,
@@ -230,7 +223,6 @@ def upsert_participant(user_id, participant):
                 country = EXCLUDED.country,
                 puntuacion = EXCLUDED.puntuacion,
                 etapa = EXCLUDED.etapa,
-                grupo = EXCLUDED.grupo,
                 experiencia = EXCLUDED.experiencia,
                 nivel = EXCLUDED.nivel
         """, (
@@ -240,13 +232,11 @@ def upsert_participant(user_id, participant):
             participant.get("platform", ""),
             participant.get("country", ""),
             participant.get("puntuacion", 0),
-            participant.get("etapa", 1),   # Valor predeterminado para etapa
-            participant.get("grupo", 0),    # Valor predeterminado para grupo
+            participant.get("etapa", current_stage),
             participant.get("experiencia", 0),
             participant.get("nivel", 1)
         ))
     get_conn().commit()
-
 
 def update_score(user_id: str, delta: int):
     participant = get_participant(user_id)
@@ -1257,17 +1247,11 @@ async def event_notifier():
 ######################################
 # SERVIDOR WEB PARA MANTENER EL BOT ACTIVO (API PRIVADA)
 ######################################
-import time
-from waitress import serve
-
 def run_flask():
-    port = int(os.environ.get("PORT", 10000))  # Usa 10000 porque es el puerto asignado por defecto en Render
-    print(f"Iniciando Flask en el puerto {port}")
-    serve(app, host="0.0.0.0", port=port)
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
 
 if __name__ == '__main__':
     flask_thread = threading.Thread(target=run_flask)
     flask_thread.start()
-    # Agrega un retraso para darle tiempo a Waitress de iniciar y abrir el puerto.
-    time.sleep(5)  # Espera 5 segundos
     bot.run(os.getenv('DISCORD_TOKEN'))

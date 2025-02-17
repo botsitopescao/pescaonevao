@@ -4,6 +4,7 @@ import psycopg2.extras
 from psycopg2 import pool
 from discord.ext import commands
 from discord.ext.commands import cooldown, BucketType
+from contextlib import contextmanager
 import json
 import random
 import os
@@ -71,29 +72,39 @@ def get_conn():
 # INICIALIZACIÓN DE LA BASE DE DATOS
 ######################################
 def init_db():
-    with get_conn().cursor() as cur:
-        # Tabla de registros
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS registrations (
-                user_id TEXT PRIMARY KEY,
-                discord_name TEXT,
-                fortnite_username TEXT,
-                platform TEXT,
-                country TEXT,
-                puntuacion INTEGER DEFAULT 0,
-                etapa INTEGER DEFAULT 1
-            )
-        """)
-        cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS discord_name TEXT")
-        cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS fortnite_username TEXT")
-        cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS platform TEXT")
-        cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS country TEXT")
-        cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS puntuacion INTEGER DEFAULT 0")
-        cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS etapa INTEGER DEFAULT 1")
-        cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS grupo INTEGER DEFAULT 0")
-        # Agregamos columnas para experiencia y nivel (MINIJUEGO DE SUBIR DE NIVEL)
-        cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS experiencia INTEGER DEFAULT 0")
-        cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS nivel INTEGER DEFAULT 1")
+    try:
+        with get_db_connection() as conn:  # Usa el context manager para asegurar que se libere la conexión
+            with conn.cursor() as cur:
+                # Desactivar el timeout para esta sesión (0 = sin límite)
+                cur.execute("SET statement_timeout = 0;")
+                
+                # Ejecuta la creación de la tabla si no existe
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS registrations (
+                        user_id TEXT PRIMARY KEY,
+                        discord_name TEXT,
+                        fortnite_username TEXT,
+                        platform TEXT,
+                        country TEXT,
+                        puntuacion INTEGER DEFAULT 0,
+                        etapa INTEGER DEFAULT 1
+                    )
+                """)
+                # Ejecuta los ALTER TABLE para asegurar que existan las columnas requeridas
+                cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS discord_name TEXT")
+                cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS fortnite_username TEXT")
+                cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS platform TEXT")
+                cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS country TEXT")
+                cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS puntuacion INTEGER DEFAULT 0")
+                cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS etapa INTEGER DEFAULT 1")
+                cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS grupo INTEGER DEFAULT 0")
+                # Agregar columnas para experiencia y nivel (minijuego de subir de nivel)
+                cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS experiencia INTEGER DEFAULT 0")
+                cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS nivel INTEGER DEFAULT 1")
+            conn.commit()
+        print("Base de datos inicializada correctamente.")
+    except Exception as e:
+        print("Error en init_db:", e)
         
         # Tabla de chistes
         cur.execute("""
@@ -364,6 +375,14 @@ def check_auth(req):
     if not auth or auth != f"Bearer {API_SECRET}":
         return False
     return True
+    
+@contextmanager
+def get_db_connection():
+    conn = get_conn()  # O la función que uses para obtener la conexión
+    try:
+        yield conn
+    finally:
+        db_pool.putconn(conn)
 
 @app.route("/", methods=["GET"])
 def home_page():

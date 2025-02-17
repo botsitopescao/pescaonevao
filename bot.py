@@ -18,6 +18,14 @@ from zoneinfo import ZoneInfo
 import urllib.parse  # para parsear la URL de la base de datos
 from PIL import Image, ImageDraw, ImageFont  # Requiere instalar Pillow (pip install Pillow)
 
+@contextmanager
+def get_db_connection():
+    conn = get_conn()  # O la función que uses para obtener la conexión
+    try:
+        yield conn
+    finally:
+        db_pool.putconn(conn)
+
 # Mapeo de países a zonas horarias
 country_timezones = {
     "Argentina": "America/Argentina/Buenos_Aires",
@@ -375,14 +383,6 @@ def check_auth(req):
     if not auth or auth != f"Bearer {API_SECRET}":
         return False
     return True
-    
-@contextmanager
-def get_db_connection():
-    conn = get_conn()  # O la función que uses para obtener la conexión
-    try:
-        yield conn
-    finally:
-        db_pool.putconn(conn)
 
 @app.route("/", methods=["GET"])
 def home_page():

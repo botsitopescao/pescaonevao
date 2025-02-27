@@ -987,13 +987,12 @@ async def trivia(ctx):
     if ctx.channel.id in active_trivia:
         del active_trivia[ctx.channel.id]
     global global_trivias_cache
+    # Si la caché de trivias está vacía, se recarga desde la base de datos
     if not global_trivias_cache:
-        if not hasattr(trivia, "initialized"):
-            with get_conn().cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-                cur.execute("SELECT * FROM trivias")
-                rows = cur.fetchall()
-                global_trivias_cache.extend(rows)
-            setattr(trivia, "initialized", True)
+        with get_conn().cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+            cur.execute("SELECT * FROM trivias")
+            rows = cur.fetchall()
+            global_trivias_cache.extend(rows)
     if global_trivias_cache:
         index = random.randrange(len(global_trivias_cache))
         trivia_item = global_trivias_cache.pop(index)

@@ -317,7 +317,7 @@ def delete_all_jokes():
 def get_random_trivia():
     global global_trivias_cache
     if not global_trivias_cache:
-        with get_conn().cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+        with get_conn().cursor() as cur:
             cur.execute("SELECT * FROM trivias")
             rows = cur.fetchall()
             global_trivias_cache = rows
@@ -989,7 +989,7 @@ async def trivia(ctx):
     global global_trivias_cache
     if not global_trivias_cache:
         if not hasattr(trivia, "initialized"):
-            with get_conn().cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+            with get_conn().cursor() as cur:
                 cur.execute("SELECT * FROM trivias")
                 rows = cur.fetchall()
                 global_trivias_cache.extend(rows)

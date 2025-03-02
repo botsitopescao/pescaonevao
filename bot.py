@@ -354,6 +354,20 @@ def delete_all_trivias():
     global_trivias_cache = []
     get_conn().commit()
 
+# NUEVA FUNCIÓN PARA AGREGAR TRIVIAS FORTNITE
+def add_triviasfortnite_bulk(trivias_list):
+    with get_conn().cursor() as cur:
+        for trivia in trivias_list:
+            question = trivia.get("question")
+            answer = trivia.get("answer")
+            hint1 = trivia.get("hint1", "")
+            hint2 = trivia.get("hint2", "")
+            cur.execute("INSERT INTO triviafortnite (question, answer, hint1, hint2) VALUES (%s, %s, %s, %s)", (question, answer, hint1, hint2))
+            asyncio.sleep(0.1)
+    global global_triviafortnite_cache
+    global_triviafortnite_cache = []
+    get_conn().commit()
+
 ######################################
 # INICIALIZACIÓN DEL BOT
 ######################################
@@ -874,6 +888,22 @@ async def agregar_trivias_masivas(ctx, *, trivias_json: str):
         if isinstance(trivias_lista, list):
             add_trivias_bulk(trivias_lista)
             await ctx.send(f"✅ Se han agregado {len(trivias_lista)} trivias a la base de datos.")
+        else:
+            await ctx.send("❌ El formato de las trivias es incorrecto. Debe ser una lista de objetos.")
+    except json.JSONDecodeError:
+        await ctx.send("❌ Error al procesar el JSON. Asegúrate de que el formato sea correcto.")
+    await asyncio.sleep(1)
+
+# NUEVO COMANDO PRO: agregar_triviasfortnite
+@bot.command()
+async def agregar_triviasfortnite(ctx, *, trivias_json: str):
+    if not is_owner_and_allowed(ctx):
+        return
+    try:
+        trivias_lista = json.loads(trivias_json)
+        if isinstance(trivias_lista, list):
+            add_triviasfortnite_bulk(trivias_lista)
+            await ctx.send(f"✅ Se han agregado {len(trivias_lista)} trivias Fortnite a la base de datos.")
         else:
             await ctx.send("❌ El formato de las trivias es incorrecto. Debe ser una lista de objetos.")
     except json.JSONDecodeError:

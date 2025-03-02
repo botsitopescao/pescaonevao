@@ -1305,7 +1305,8 @@ async def event_notifier():
 ######################################
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port)
+    from waitress import serve
+    serve(app, host="0.0.0.0", port=port)
 
 if __name__ == '__main__':
     flask_thread = threading.Thread(target=run_flask)

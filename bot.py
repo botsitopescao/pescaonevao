@@ -212,6 +212,7 @@ active_trivia = {}
 
 global_jokes_cache = []
 global_trivias_cache = []
+global_triviafortnite_cache = []
 
 ######################################
 # FUNCIONES PARA LA BASE DE DATOS
@@ -653,7 +654,6 @@ async def lista_registrados(ctx):
         await ctx.send(full_message[i:i+max_length])
     await asyncio.sleep(1)
 
-
 @bot.command()
 async def registrar_usuario(ctx, *, args: str):
     if not is_owner_and_allowed(ctx):
@@ -1012,6 +1012,37 @@ async def trivia(ctx):
 
 @bot.command()
 @cooldown(1, 10, BucketType.user)
+async def triviafortnite(ctx):
+    if ctx.author.bot:
+        return
+    if ctx.channel.id in active_trivia:
+        del active_trivia[ctx.channel.id]
+    global global_triviafortnite_cache
+    # Si la caché de trivias de Fortnite está vacía, se recarga desde la base de datos
+    if not global_triviafortnite_cache:
+        with get_conn().cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+            cur.execute("SELECT * FROM triviafortnite")
+            rows = cur.fetchall()
+            global_triviafortnite_cache.extend(rows)
+    if global_triviafortnite_cache:
+        index = random.randrange(len(global_triviafortnite_cache))
+        trivia_item = global_triviafortnite_cache.pop(index)
+    else:
+        trivia_item = None
+    if trivia_item:
+        active_trivia[ctx.channel.id] = {
+            "question": trivia_item["question"],
+            "answer": normalize_string(trivia_item["answer"]),
+            "hint1": trivia_item.get("hint1", ""),
+            "hint2": trivia_item.get("hint2", ""),
+            "attempts": {}
+        }
+        await ctx.send(f"**Trivia Fortnite:** {trivia_item['question']}\n_Responde en el chat._")
+    else:
+        await ctx.send("No tengo más trivias de Fortnite disponibles en este momento.")
+
+@bot.command()
+@cooldown(1, 10, BucketType.user)
 async def chiste(ctx):
     if ctx.author.bot:
         return
@@ -1072,7 +1103,7 @@ async def on_message_no_prefix(message):
     if message.content.startswith(PREFIX):
         return
     content = message.content.lower().strip()
-    if content in ('trivia', 'chiste', 'ranking', 'topmejores', 'vermigrupo', 'minivel'):
+    if content in ('trivia', 'triviafortnite', 'chiste', 'ranking', 'topmejores', 'vermigrupo', 'minivel'):
         message.content = PREFIX + content
         ctx = await bot.get_context(message)
         await bot.invoke(ctx)

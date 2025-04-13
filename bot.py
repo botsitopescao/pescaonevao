@@ -17,6 +17,7 @@ from flask import Flask, request, jsonify
 from zoneinfo import ZoneInfo
 import urllib.parse  # para parsear la URL de la base de datos
 from PIL import Image, ImageDraw, ImageFont  # Requiere instalar Pillow (pip install Pillow)
+import aiohttp  # Se utiliza para obtener el config.json desde la URL
 
 @contextmanager
 def get_db_connection():
@@ -95,10 +96,14 @@ def init_db():
                         platform TEXT,
                         country TEXT,
                         puntuacion INTEGER DEFAULT 0,
-                        etapa INTEGER DEFAULT 1
+                        etapa INTEGER DEFAULT 1,
+                        grupo INTEGER DEFAULT 0,
+                        experiencia INTEGER DEFAULT 0,
+                        nivel INTEGER DEFAULT 1,
+                        team_members TEXT DEFAULT ''  -- Se agrega la columna para los miembros del equipo
                     )
                 """)
-                # Ejecuta los ALTER TABLE para asegurar que existan las columnas requeridas
+                # Se realizan los ALTER TABLE para asegurar que existan las columnas requeridas
                 cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS discord_name TEXT")
                 cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS fortnite_username TEXT")
                 cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS platform TEXT")
@@ -106,9 +111,9 @@ def init_db():
                 cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS puntuacion INTEGER DEFAULT 0")
                 cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS etapa INTEGER DEFAULT 1")
                 cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS grupo INTEGER DEFAULT 0")
-                # Agregar columnas para experiencia y nivel (minijuego de subir de nivel)
                 cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS experiencia INTEGER DEFAULT 0")
                 cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS nivel INTEGER DEFAULT 1")
+                cur.execute("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS team_members TEXT DEFAULT ''")
             conn.commit()
         print("Base de datos inicializada correctamente.")
     except Exception as e:
@@ -214,6 +219,10 @@ global_jokes_cache = []
 global_trivias_cache = []
 global_triviafortnite_cache = []
 
+# VARIABLE GLOBAL PARA EL CONFIG DEL TORNEO
+# Valores posibles: "solo", "duos", "trios", "escuadrones"
+tournament_mode = "solo"
+
 ######################################
 # FUNCIONES PARA LA BASE DE DATOS
 ######################################
@@ -234,8 +243,8 @@ def get_all_participants():
 def upsert_participant(user_id, participant):
     with get_conn().cursor() as cur:
         cur.execute("""
-            INSERT INTO registrations (user_id, discord_name, fortnite_username, platform, country, puntuacion, etapa, experiencia, nivel)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO registrations (user_id, discord_name, fortnite_username, platform, country, puntuacion, etapa, experiencia, nivel, team_members)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (user_id) DO UPDATE SET
                 discord_name = EXCLUDED.discord_name,
                 fortnite_username = EXCLUDED.fortnite_username,
@@ -244,7 +253,8 @@ def upsert_participant(user_id, participant):
                 puntuacion = EXCLUDED.puntuacion,
                 etapa = EXCLUDED.etapa,
                 experiencia = EXCLUDED.experiencia,
-                nivel = EXCLUDED.nivel
+                nivel = EXCLUDED.nivel,
+                team_members = EXCLUDED.team_members
         """, (
             user_id,
             participant["discord_name"],
@@ -254,7 +264,8 @@ def upsert_participant(user_id, participant):
             participant.get("puntuacion", 0),
             participant.get("etapa", current_stage),
             participant.get("experiencia", 0),
-            participant.get("nivel", 1)
+            participant.get("nivel", 1),
+            participant.get("team_members", "")
         ))
     get_conn().commit()
 
@@ -269,7 +280,8 @@ def update_score(user_id: str, delta: int):
             "puntuacion": 0,
             "etapa": current_stage,
             "experiencia": 0,
-            "nivel": 1
+            "nivel": 1,
+            "team_members": ""
         }
     new_points = int(participant.get("puntuacion", 0)) + delta
     participant["puntuacion"] = new_points
@@ -454,7 +466,8 @@ def api_registrar_usuario():
         "puntuacion": data.get("puntuacion", 0),
         "etapa": data.get("etapa", current_stage),
         "experiencia": data.get("experiencia", 0),
-        "nivel": data.get("nivel", 1)
+        "nivel": data.get("nivel", 1),
+        "team_members": data.get("team_members", "")
     }
 
     try:
@@ -601,6 +614,21 @@ def api_eliminar_trivias():
 def is_owner_and_allowed(ctx):
     return ctx.author.id == OWNER_ID and (isinstance(ctx.channel, discord.DMChannel) or ctx.channel.id == SPECIAL_HELP_CHANNEL)
 
+# Función auxiliar para determinar el team líder en modos de equipo
+def get_team_leader(user_id: str, all_participants: dict):
+    # Si el usuario tiene team_members no vacíos, es líder
+    participant = all_participants.get(user_id)
+    if participant and participant.get("team_members", "").strip() != "":
+        return participant
+    # Si no, se busca si su user_id aparece en algún team_members de algún líder
+    for pid, part in all_participants.items():
+        tm = part.get("team_members", "").strip()
+        if tm:
+            members = [m.strip() for m in tm.split(",") if m.strip() != ""]
+            if user_id in members:
+                return part
+    return None
+
 ######################################
 # COMANDOS PRO (SOLO OWNER_ID)
 ######################################
@@ -685,7 +713,8 @@ async def registrar_usuario(ctx, *, args: str):
         "puntuacion": 0,
         "etapa": current_stage,
         "experiencia": 0,
-        "nivel": 1
+        "nivel": 1,
+        "team_members": ""
     }
     upsert_participant(discord_id, participant)
     await ctx.send(f"✅ Usuario {discord_name} registrado correctamente con Discord ID {discord_id}.")
@@ -793,18 +822,26 @@ async def borrar_evento(ctx, event_id: int):
             await ctx.send(f"❌ No se encontró un evento con ID {event_id}.")
     get_conn().commit()
 
+# ----------------- MODIFICACIONES PARA TOURNAMENT_MODE (solo vs equipos) -----------------
+
 @bot.command()
 async def avanzar_etapa(ctx, etapa: int):
     if not is_owner_and_allowed(ctx):
         return
-    global current_stage
+    global current_stage, tournament_mode
     old_stage = current_stage
     current_stage = etapa
     data = get_all_participants()
-    limite_jugadores = STAGES.get(etapa, None)
-    if limite_jugadores is not None:
+    limite = STAGES.get(etapa, None)
+    if limite is None:
+        await ctx.send(f"❌ La etapa {etapa} no está definida en STAGES.")
+        await asyncio.sleep(1)
+        return
+
+    # Modo SOLO: función original
+    if tournament_mode == "solo":
         sorted_players = sorted(data["participants"].items(), key=lambda item: int(item[1].get("puntuacion", 0)), reverse=True)
-        advanced = sorted_players[:limite_jugadores]
+        advanced = sorted_players[:limite]
         for user_id, participant in advanced:
             participant["etapa"] = etapa
             upsert_participant(user_id, participant)
@@ -824,25 +861,25 @@ async def avanzar_etapa(ctx, etapa: int):
                 num_groups = 1
             advanced_shuffled = advanced[:]
             random.shuffle(advanced_shuffled)
-            group_size = limite_jugadores // num_groups
+            group_size = limite // num_groups
             for i, (user_id, participant) in enumerate(advanced_shuffled):
                 participant["grupo"] = (i // group_size) + 1
                 upsert_participant(user_id, participant)
                 await asyncio.sleep(1)
-        await ctx.send(f"✅ Etapa actualizada a {etapa}. {limite_jugadores} jugadores han avanzado a esta etapa.")
+        await ctx.send(f"✅ Etapa actualizada a {etapa}. {limite} jugadores han avanzado a esta etapa.")
         if etapa > old_stage:
             for user_id, participant in advanced:
                 user = bot.get_user(int(user_id))
                 if user is not None:
                     try:
                         if etapa == 6:
-                            msg = "🏆 ¡Felicidades! Eres el campeón del torneo y acabas de ganar 2800 paVos que se te entregarán en forma de regalos de la tienda de objetos de Fortnite, así que envíame los nombres de los objetos que quieres que te regale que sumen 2800 paVos."
+                            msg = "🏆 ¡Felicidades! Eres el campeón del torneo y acabas de ganar 2800 paVos..."
                             dm_forwarding[str(user_id)] = None
                         elif etapa == 7:
                             msg = "🎁 Todavía te quedan objetos por escoger para completar tu premio de 2800 paVos."
                             dm_forwarding[str(user_id)] = None
                         elif etapa == 8:
-                            msg = "🥇 Tus objetos han sido entregados campeón, muchas gracias por participar, has sido el mejor pescadito del torneo, nos vemos pronto."
+                            msg = "🥇 Tus objetos han sido entregados campeón, muchas gracias por participar..."
                             dm_forwarding[str(user_id)] = datetime.datetime.utcnow() + datetime.timedelta(days=2)
                         else:
                             msg = f"🎉 ¡Felicidades! Has avanzado a la etapa {etapa}."
@@ -861,72 +898,260 @@ async def avanzar_etapa(ctx, etapa: int):
                     await asyncio.sleep(1)
         await asyncio.sleep(1)
     else:
-        await ctx.send(f"❌ La etapa {etapa} no está definida en STAGES.")
+        # Modos de equipo: duos, trios, escuadrones
+        # Determinar el tamaño requerido del equipo
+        if tournament_mode == "duos":
+            required_team_members = 1  # además del líder
+        elif tournament_mode == "trios":
+            required_team_members = 2
+        elif tournament_mode == "escuadrones":
+            required_team_members = 3
+        else:
+            await ctx.send("❌ tournament_mode desconocido.")
+            return
+
+        # Construir equipos completos: solo se consideran registros donde el campo team_members tenga la cantidad requerida
+        equipos = []
+        for uid, participant in data["participants"].items():
+            tm = participant.get("team_members", "").strip()
+            # Solo se toman equipos donde el líder tenga team_members y se ignoran a quienes aparezcan como miembro
+            if tm != "":
+                members = [m.strip() for m in tm.split(",") if m.strip() != ""]
+                if len(members) == required_team_members:
+                    equipos.append( (uid, participant, members) )
+        # Ordenar equipos por la puntuación del líder (descendente)
+        equipos.sort(key=lambda tup: int(tup[1].get("puntuacion", 0)), reverse=True)
+        # Seleccionar los equipos que avanzan (se requieren 'limite' equipos)
+        equipos_avanzados = equipos[:limite]
+        # Actualizar la etapa para cada equipo completo: líder y sus miembros
+        for leader_id, leader_part, members in equipos_avanzados:
+            leader_part["etapa"] = etapa
+            upsert_participant(leader_id, leader_part)
+            await asyncio.sleep(1)
+            for member_id in members:
+                member = get_participant(member_id)
+                if member:
+                    member["etapa"] = etapa
+                    upsert_participant(member_id, member)
+                await asyncio.sleep(1)
+        # Asignación de grupos a nivel de equipos (se conserva la misma lógica que en solo, pero por equipos)
+        if etapa in [1, 2, 3, 4, 5]:
+            if etapa == 1:
+                num_groups = 4
+            elif etapa == 2:
+                num_groups = 4
+            elif etapa == 3:
+                num_groups = 4
+            elif etapa == 4:
+                num_groups = 2
+            elif etapa == 5:
+                num_groups = 1
+            else:
+                num_groups = 1
+            equipos_shuffled = equipos_avanzados[:]
+            random.shuffle(equipos_shuffled)
+            group_size = limite // num_groups if num_groups > 0 else 1
+            for i, (leader_id, leader_part, members) in enumerate(equipos_shuffled):
+                grupo = (i // group_size) + 1
+                leader_part["grupo"] = grupo
+                upsert_participant(leader_id, leader_part)
+                await asyncio.sleep(1)
+                # Actualizar también el grupo para cada miembro
+                for member_id in members:
+                    member = get_participant(member_id)
+                    if member:
+                        member["grupo"] = grupo
+                        upsert_participant(member_id, member)
+                    await asyncio.sleep(1)
+        await ctx.send(f"✅ Etapa actualizada a {etapa}. {len(equipos_avanzados)} equipos han avanzado a esta etapa.")
+        # Enviar mensajes directos según avance o eliminación para equipos
+        if etapa > old_stage:
+            for leader_id, leader_part, members in equipos_avanzados:
+                user = bot.get_user(int(leader_id))
+                if user is not None:
+                    try:
+                        if etapa == 6:
+                            msg = "🏆 ¡Felicidades! Eres el campeón del torneo y has ganado 2800 paVos..."
+                            dm_forwarding[str(leader_id)] = None
+                        elif etapa == 7:
+                            msg = "🎁 Todavía te quedan objetos por escoger para completar tu premio de 2800 paVos."
+                            dm_forwarding[str(leader_id)] = None
+                        elif etapa == 8:
+                            msg = "🥇 Tus objetos han sido entregados campeón, muchas gracias por participar..."
+                            dm_forwarding[str(leader_id)] = datetime.datetime.utcnow() + datetime.timedelta(days=2)
+                        else:
+                            msg = f"🎉 ¡Felicidades! Has avanzado a la etapa {etapa}."
+                        await user.send(msg)
+                    except Exception as e:
+                        print(f"Error enviando DM a {leader_id}: {e}")
+                    await asyncio.sleep(1)
+                    # Enviar el mismo mensaje a cada miembro del equipo
+                    for member_id in members:
+                        member_user = bot.get_user(int(member_id))
+                        if member_user is not None:
+                            try:
+                                await member_user.send(msg)
+                            except Exception as e:
+                                print(f"Error enviando DM a {member_id}: {e}")
+                        await asyncio.sleep(1)
+            # Notificar a equipos completos no seleccionados
+            # Se recorre todos los equipos completos y se notifica a quienes no avanzaron
+            avanzados_set = set([leader_id for leader_id,_,_ in equipos_avanzados])
+            for leader_id, leader_part, members in equipos:
+                if leader_id not in avanzados_set:
+                    user = bot.get_user(int(leader_id))
+                    if user is not None:
+                        try:
+                            await user.send(f"😢 Lamentamos informarte que no has avanzado a la etapa {etapa} y tu equipo ha sido eliminado del torneo.")
+                        except Exception as e:
+                            print(f"Error enviando DM a {leader_id}: {e}")
+                    await asyncio.sleep(1)
+                    for member_id in members:
+                        member_user = bot.get_user(int(member_id))
+                        if member_user is not None:
+                            try:
+                                await member_user.send(f"😢 Lamentamos informarte que no has avanzado a la etapa {etapa} y tu equipo ha sido eliminado del torneo.")
+                            except Exception as e:
+                                print(f"Error enviando DM a {member_id}: {e}")
+                        await asyncio.sleep(1)
         await asyncio.sleep(1)
 
-######################################
-# COMANDOS MASIVOS DE CHISTES Y TRIVIAS
-######################################
+# ----------------- COMANDOS COMUNES MODIFICADOS SEGÚN TOURNAMENT_MODE -----------------
+
 @bot.command()
-async def agregar_chistes_masivos(ctx, *, chistes_texto: str):
-    if not is_owner_and_allowed(ctx):
-        return
-    chistes_lista = [chiste.strip() for chiste in chistes_texto.strip().split('\n') if chiste.strip()]
-    if chistes_lista:
-        add_jokes_bulk(chistes_lista)
-        await ctx.send(f"✅ Se han agregado {len(chistes_lista)} chistes a la base de datos.")
+@cooldown(1, 10, BucketType.user)
+async def ranking(ctx):
+    # Para modos de equipo: si el usuario es miembro se consulta el registro de su líder
+    global tournament_mode
+    if tournament_mode == "solo":
+        user_id = str(ctx.author.id)
+        participant = get_participant(user_id)
+        if participant:
+            puntos = participant.get("puntuacion", 0)
+            await ctx.send(f"🌟 {ctx.author.display_name}, tienes **{puntos} puntos** en el torneo.")
+        else:
+            await ctx.send("❌ No estás registrado en el torneo.")
     else:
-        await ctx.send("❌ No se encontraron chistes para agregar.")
-    await asyncio.sleep(1)
-
-@bot.command()
-async def agregar_trivias_masivas(ctx, *, trivias_json: str):
-    if not is_owner_and_allowed(ctx):
-        return
-    try:
-        trivias_lista = json.loads(trivias_json)
-        if isinstance(trivias_lista, list):
-            add_trivias_bulk(trivias_lista)
-            await ctx.send(f"✅ Se han agregado {len(trivias_lista)} trivias a la base de datos.")
+        # Modo equipos
+        user_id = str(ctx.author.id)
+        all_parts = get_all_participants()["participants"]
+        leader = None
+        part = all_parts.get(user_id)
+        # Si el usuario es líder (team_members no vacío)
+        if part and part.get("team_members", "").strip() != "":
+            leader = part
         else:
-            await ctx.send("❌ El formato de las trivias es incorrecto. Debe ser una lista de objetos.")
-    except json.JSONDecodeError:
-        await ctx.send("❌ Error al procesar el JSON. Asegúrate de que el formato sea correcto.")
-    await asyncio.sleep(1)
-
-# NUEVO COMANDO PRO: agregar_triviasfortnite
-@bot.command()
-async def agregar_triviasfortnite(ctx, *, trivias_json: str):
-    if not is_owner_and_allowed(ctx):
-        return
-    try:
-        trivias_lista = json.loads(trivias_json)
-        if isinstance(trivias_lista, list):
-            add_triviasfortnite_bulk(trivias_lista)
-            await ctx.send(f"✅ Se han agregado {len(trivias_lista)} trivias Fortnite a la base de datos.")
+            # Buscar si el usuario es miembro
+            leader = get_team_leader(user_id, all_parts)
+        if leader:
+            puntos = leader.get("puntuacion", 0)
+            # Mostrar el fortnite_username correspondiente al líder
+            await ctx.send(f"🌟 {leader.get('fortnite_username')}, tu equipo tiene **{puntos} puntos** en el torneo.")
         else:
-            await ctx.send("❌ El formato de las trivias es incorrecto. Debe ser una lista de objetos.")
-    except json.JSONDecodeError:
-        await ctx.send("❌ Error al procesar el JSON. Asegúrate de que el formato sea correcto.")
+            await ctx.send("❌ No estás registrado en el torneo o todavía no formas equipo. En la aplicación Pescadito FN o en la página web https://pescadito.lat ve a Ajustes y forma tu equipo.")
     await asyncio.sleep(1)
 
 @bot.command()
-async def eliminar_todos_chistes(ctx):
-    if not is_owner_and_allowed(ctx):
-        return
-    delete_all_jokes()
-    await ctx.send("✅ Se han eliminado todos los chistes de la base de datos.")
+@cooldown(1, 10, BucketType.user)
+async def topmejores(ctx):
+    global tournament_mode
+    if tournament_mode == "solo":
+        with get_conn().cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+            cur.execute("""
+                SELECT fortnite_username, puntuacion
+                FROM registrations
+                ORDER BY puntuacion DESC
+                LIMIT 10
+            """)
+            top_players = cur.fetchall()
+        if top_players:
+            lines = ["🏆 **Top 10 Mejores del Torneo:**"]
+            for idx, player in enumerate(top_players, start=1):
+                lines.append(f"{idx}. {player['fortnite_username']} - {player['puntuacion']} puntos")
+            message = "\n".join(lines)
+            await ctx.send(message)
+        else:
+            await ctx.send("No hay participantes en el torneo.")
+    else:
+        # Modo equipos: se agrupan únicamente equipos completos.
+        all_parts = get_all_participants()["participants"]
+        equipos = []
+        if tournament_mode == "duos":
+            required_team_members = 1
+        elif tournament_mode == "trios":
+            required_team_members = 2
+        elif tournament_mode == "escuadrones":
+            required_team_members = 3
+        else:
+            await ctx.send("❌ tournament_mode desconocido.")
+            return
+        for uid, part in all_parts.items():
+            tm = part.get("team_members", "").strip()
+            if tm != "":
+                members = [m.strip() for m in tm.split(",") if m.strip() != ""]
+                if len(members) == required_team_members:
+                    equipos.append( (uid, part, members) )
+        # Ordenar equipos por puntuación del líder descendente
+        equipos.sort(key=lambda tup: int(tup[1].get("puntuacion", 0)), reverse=True)
+        if equipos:
+            lines = ["🏆 **Top Mejores del Torneo (Equipos Completos):**"]
+            for idx, (leader_id, leader_part, members) in enumerate(equipos, start=1):
+                # Obtener nombres usando fortnite_username
+                nombres = [leader_part.get("fortnite_username", "N/D")]
+                for m_id in members:
+                    miembro = get_participant(m_id)
+                    if miembro:
+                        nombres.append(miembro.get("fortnite_username", "N/D"))
+                linea = f"{idx}. " + ", ".join(nombres)
+                lines.append(linea)
+            # Enviar en fragmentos si es demasiado largo, asegurando que cada línea (equipo) se mantenga junta.
+            mensaje_final = ""
+            for linea in lines:
+                if len(mensaje_final) + len(linea) + 1 > 1900:
+                    await ctx.send(mensaje_final)
+                    mensaje_final = linea + "\n"
+                else:
+                    mensaje_final += linea + "\n"
+            if mensaje_final:
+                await ctx.send(mensaje_final)
+        else:
+            await ctx.send("No hay equipos completos registrados en el torneo.")
     await asyncio.sleep(1)
 
 @bot.command()
-async def eliminar_todas_trivias(ctx):
-    if not is_owner_and_allowed(ctx):
-        return
-    delete_all_trivias()
-    await ctx.send("✅ Se han eliminado todas las trivias de la base de datos.")
+async def vermigrupo(ctx):
+    global tournament_mode
+    if tournament_mode == "solo":
+        user_id = str(ctx.author.id)
+        participant = get_participant(user_id)
+        if participant:
+            fortnite_username = participant.get("fortnite_username", user_id)
+            etapa = participant.get("etapa", "N/A")
+            grupo = participant.get("grupo", "N/A")
+            await ctx.send(f"Hola {fortnite_username}, estás en la etapa {etapa} del torneo y tu grupo es el {grupo}.")
+        else:
+            await ctx.send("❌ No estás registrado en el torneo.")
+    else:
+        all_parts = get_all_participants()["participants"]
+        user_id = str(ctx.author.id)
+        leader = None
+        part = all_parts.get(user_id)
+        if part and part.get("team_members", "").strip() != "":
+            leader = part
+        else:
+            leader = get_team_leader(user_id, all_parts)
+        if leader:
+            etapa = leader.get("etapa", "N/A")
+            grupo = leader.get("grupo", "N/A")
+            await ctx.send(f"Hola {leader.get('fortnite_username')}, tu equipo está en la etapa {etapa} y en el grupo {grupo}.")
+        else:
+            await ctx.send("❌ No estás registrado en el torneo o todavía no formas equipo. En la aplicación Pescadito FN o en la página web https://pescadito.lat ve a Ajustes y forma tu equipo.")
     await asyncio.sleep(1)
 
+# ----------------- FIN MODIFICACIONES TOURNAMENT_MODE -----------------
+
 @bot.command()
+@cooldown(1, 10, BucketType.user)
 async def triviagrupal(ctx):
     if ctx.author.id != OWNER_ID:
         return
@@ -970,9 +1195,6 @@ async def triviagrupal(ctx):
         update_score(str(msg.author.id), 15)
         await general_channel.send(f"Respuesta correcta, {fortnite_name}, has ganado 15 puntos.")
 
-######################################
-# COMANDO DE MINIJUEGO DE SUBIR DE NIVEL
-######################################
 @bot.command()
 async def minivel(ctx):
     user_id = str(ctx.author.id)
@@ -1006,9 +1228,6 @@ async def minivel(ctx):
     file = discord.File(fp=bio, filename="minivel.png")
     await ctx.send(file=file)
 
-######################################
-# COMANDOS COMUNES (DISPONIBLES PARA TODOS)
-######################################
 @bot.command()
 @cooldown(1, 10, BucketType.user)
 async def trivia(ctx):
@@ -1081,50 +1300,9 @@ async def chiste(ctx):
 
 @bot.command()
 @cooldown(1, 10, BucketType.user)
-async def ranking(ctx):
-    if ctx.author.bot:
-        return
-    user_id = str(ctx.author.id)
-    participant = get_participant(user_id)
-    if participant:
-        puntos = participant.get("puntuacion", 0)
-        await ctx.send(f"🌟 {ctx.author.display_name}, tienes **{puntos} puntos** en el torneo.")
-    else:
-        await ctx.send("❌ No estás registrado en el torneo.")
-
-@bot.command()
-@cooldown(1, 10, BucketType.user)
-async def topmejores(ctx):
-    if ctx.author.bot:
-        return
-    with get_conn().cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-        cur.execute("""
-            SELECT fortnite_username, puntuacion
-            FROM registrations
-            ORDER BY puntuacion DESC
-            LIMIT 10
-        """)
-        top_players = cur.fetchall()
-    if top_players:
-        lines = ["🏆 **Top 10 Mejores del Torneo:**"]
-        for idx, player in enumerate(top_players, start=1):
-            lines.append(f"{idx}. {player['fortnite_username']} - {player['puntuacion']} puntos")
-        message = "\n".join(lines)
-        await ctx.send(message)
-    else:
-        await ctx.send("No hay participantes en el torneo.")
-
-@bot.command()
 async def vermigrupo(ctx):
-    user_id = str(ctx.author.id)
-    participant = get_participant(user_id)
-    if participant:
-        fortnite_username = participant.get("fortnite_username", user_id)
-        etapa = participant.get("etapa", "N/A")
-        grupo = participant.get("grupo", "N/A")
-        await ctx.send(f"Hola {fortnite_username}, estás en la etapa {etapa} del torneo y tu grupo es el {grupo}.")
-    else:
-        await ctx.send("❌ No estás registrado en el torneo.")
+    # La implementación para vermigrupo ya se encuentra en la sección modificada arriba.
+    pass  # (Ya se define en la sección correspondiente)
 
 @bot.listen('on_message')
 async def on_message_no_prefix(message):
@@ -1239,7 +1417,25 @@ async def on_command_error(ctx, error):
 @bot.event
 async def on_ready():
     print(f'Bot conectado como {bot.user.name}')
+    # Obtener el tournament_mode desde la URL al iniciar el bot
+    await fetch_config()
     bot.loop.create_task(event_notifier())
+
+# Función asíncrona para obtener el tournament_mode desde la URL
+async def fetch_config():
+    global tournament_mode
+    url = "https://pescadito-ddcb0.web.app/config.json"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                if resp.status == 200:
+                    config = await resp.json()
+                    tournament_mode = config.get("tournament_mode", "solo").lower()
+                    print(f"Config cargado: tournament_mode = {tournament_mode}")
+                else:
+                    print(f"Error al obtener config (status {resp.status}). Se usará el modo por defecto 'solo'.")
+    except Exception as e:
+        print(f"Excepción al obtener config: {e}. Se usará el modo por defecto 'solo'.")
 
 async def event_notifier():
     await bot.wait_until_ready()
@@ -1262,7 +1458,7 @@ async def event_notifier():
                         tz_user = ZoneInfo(country_timezones.get(user_row["country"], "UTC"))
                         local_dt = event_dt.astimezone(tz_user)
                         msg = (f"⏰ Faltan 10 horas para '{ev['name']}', que se realizará el "
-                               f"{local_dt.strftime('%d/%m/%Y %H:%M')} hora {user_row['country']}. Recuerda que si llegas tarde, quedarás automáticamente eliminado del torneo así tengas puntaje alto.")
+                               f"{local_dt.strftime('%d/%m/%Y %H:%M')} hora {user_row['country']}. Recuerda que si llegas tarde, quedarás automáticamente eliminado del torneo.")
                         try:
                             await user.send(msg)
                         except Exception as e:
@@ -1281,7 +1477,7 @@ async def event_notifier():
                         tz_user = ZoneInfo(country_timezones.get(user_row["country"], "UTC"))
                         local_dt = event_dt.astimezone(tz_user)
                         msg = (f"⏰ Faltan 2 horas para '{ev['name']}', que se realizará el "
-                               f"{local_dt.strftime('%d/%m/%Y %H:%M')} hora {user_row['country']}. Recuerda que si llegas tarde, quedarás automáticamente eliminado del torneo así tengas puntaje alto.")
+                               f"{local_dt.strftime('%d/%m/%Y %H:%M')} hora {user_row['country']}. Recuerda que si llegas tarde, quedarás automáticamente eliminado del torneo.")
                         try:
                             await user.send(msg)
                         except Exception as e:
@@ -1300,7 +1496,7 @@ async def event_notifier():
                         tz_user = ZoneInfo(country_timezones.get(user_row["country"], "UTC"))
                         local_dt = event_dt.astimezone(tz_user)
                         msg = (f"⏰ Faltan 10 minutos para '{ev['name']}', que se realizará el "
-                               f"{local_dt.strftime('%d/%m/%Y %H:%M')} hora {user_row['country']}. Recuerda que si llegas tarde, quedarás automáticamente eliminado del torneo así tengas puntaje alto.")
+                               f"{local_dt.strftime('%d/%m/%Y %H:%M')} hora {user_row['country']}. Recuerda que si llegas tarde, quedarás automáticamente eliminado del torneo.")
                         try:
                             await user.send(msg)
                         except Exception as e:
@@ -1319,7 +1515,7 @@ async def event_notifier():
                         tz_user = ZoneInfo(country_timezones.get(user_row["country"], "UTC"))
                         local_dt = event_dt.astimezone(tz_user)
                         msg = (f"⏰ Faltan 2 minutos para '{ev['name']}', que se realizará el "
-                               f"{local_dt.strftime('%d/%m/%Y %H:%M')} hora {user_row['country']}. Recuerda que si llegas tarde, quedarás automáticamente eliminado del torneo así tengas puntaje alto.")
+                               f"{local_dt.strftime('%d/%m/%Y %H:%M')} hora {user_row['country']}. Recuerda que si llegas tarde, quedarás automáticamente eliminado del torneo.")
                         try:
                             await user.send(msg)
                         except Exception as e:

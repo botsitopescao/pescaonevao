@@ -676,6 +676,17 @@ async def restar_puntos_todos(ctx, puntos: int, etapa: int = None):
     await asyncio.sleep(1)
 
 @bot.command()
+async def mensaje(ctx, *, content: str):
+    if ctx.author.id != OWNER_ID:
+        return
+    target_channel = bot.get_channel(1337387113444020257)
+    if target_channel is not None:
+        await target_channel.send(content)
+    else:
+        await ctx.send("No se encontró el canal destino.")
+    await asyncio.sleep(1)
+
+@bot.command()
 async def lista_registrados(ctx):
     if not is_owner_and_allowed(ctx):
         return

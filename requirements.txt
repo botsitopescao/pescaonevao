@@ -7,3 +7,4 @@ asyncio
 datetime
 Pillow
 waitress
+aiohttp

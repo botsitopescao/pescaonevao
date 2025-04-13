@@ -618,11 +618,20 @@ def is_owner_and_allowed(ctx):
 def get_team_leader(user_id: str, all_participants: dict):
     # Si el usuario tiene team_members no vacíos, es líder
     participant = all_participants.get(user_id)
-    if participant and participant.get("team_members", "").strip() != "":
-        return participant
+    if participant:
+        tm = participant.get("team_members", "")
+        if tm is None:
+            tm = ""
+        if tm.strip() != "":
+            return participant
     # Si no, se busca si su user_id aparece en algún team_members de algún líder
     for pid, part in all_participants.items():
-        tm = part.get("team_members", "").strip()
+        if part is None:
+            continue
+        tm = part.get("team_members", "")
+        if tm is None:
+            tm = ""
+        tm = tm.strip()
         if tm:
             members = [m.strip() for m in tm.split(",") if m.strip() != ""]
             if user_id in members:
@@ -924,12 +933,17 @@ async def avanzar_etapa(ctx, etapa: int):
         # Construir equipos completos: solo se consideran registros donde el campo team_members tenga la cantidad requerida
         equipos = []
         for uid, participant in data["participants"].items():
-            tm = participant.get("team_members", "").strip()
+            if participant is None:
+                continue
+            tm = participant.get("team_members", "")
+            if tm is None:
+                tm = ""
+            tm = tm.strip()
             # Solo se toman equipos donde el líder tenga team_members y se ignoran a quienes aparezcan como miembro
             if tm != "":
                 members = [m.strip() for m in tm.split(",") if m.strip() != ""]
                 if len(members) == required_team_members:
-                    equipos.append( (uid, participant, members) )
+                    equipos.append((uid, participant, members))
         # Ordenar equipos por la puntuación del líder (descendente)
         equipos.sort(key=lambda tup: int(tup[1].get("puntuacion", 0)), reverse=True)
         # Seleccionar los equipos que avanzan (se requieren 'limite' equipos)

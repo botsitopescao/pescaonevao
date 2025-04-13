@@ -1309,11 +1309,11 @@ async def chiste(ctx):
     joke = get_random_joke()
     await ctx.send(joke)
 
-@bot.command()
-@cooldown(1, 10, BucketType.user)
-async def vermigrupo(ctx):
+#@bot.command()
+#@cooldown(1, 10, BucketType.user)
+#async def vermigrupo(ctx):
     # La implementación para vermigrupo ya se encuentra en la sección modificada arriba.
-    pass  # (Ya se define en la sección correspondiente)
+    #pass  # (Ya se define en la sección correspondiente)
 
 @bot.listen('on_message')
 async def on_message_no_prefix(message):

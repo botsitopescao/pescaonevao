@@ -1097,11 +1097,16 @@ async def topmejores(ctx):
             await ctx.send("❌ tournament_mode desconocido.")
             return
         for uid, part in all_parts.items():
-            tm = part.get("team_members", "").strip()
+            if part is None:
+                continue
+            tm = part.get("team_members", "")
+            if tm is None:
+                tm = ""
+            tm = tm.strip()
             if tm != "":
                 members = [m.strip() for m in tm.split(",") if m.strip() != ""]
                 if len(members) == required_team_members:
-                    equipos.append( (uid, part, members) )
+                    equipos.append((uid, part, members))
         # Ordenar equipos por puntuación del líder descendente
         equipos.sort(key=lambda tup: int(tup[1].get("puntuacion", 0)), reverse=True)
         if equipos:

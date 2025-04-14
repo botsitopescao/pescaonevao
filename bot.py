@@ -1172,10 +1172,12 @@ async def vermigrupo(ctx):
         user_id = str(ctx.author.id)
         leader = None
         part = all_parts.get(user_id)
-        if part and part.get("team_members", "").strip() != "":
-            leader = part
-        else:
-            leader = get_team_leader(user_id, all_parts)
+        if part is not None:
+            team_members = part.get("team_members")
+            if team_members and team_members.strip() != "":
+                leader = part
+            if leader is None:
+                leader = get_team_leader(user_id, all_parts)
         if leader:
             etapa = leader.get("etapa", "N/A")
             grupo = leader.get("grupo", "N/A")

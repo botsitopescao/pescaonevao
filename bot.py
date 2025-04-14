@@ -1063,8 +1063,14 @@ async def ranking(ctx):
         leader = None
         part = all_parts.get(user_id)
         # Si el usuario es líder (team_members no vacío)
-        if part and part.get("team_members", "").strip() != "":
-            leader = part
+        if part is not None:
+            tm = part.get("team_members", "")
+            if tm is None:
+                tm = ""
+            if tm.strip() != "":
+                leader = part
+            else:
+                leader = get_team_leader(user_id, all_parts)
         else:
             # Buscar si el usuario es miembro
             leader = get_team_leader(user_id, all_parts)

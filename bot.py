@@ -1476,7 +1476,8 @@ async def on_command_error(ctx, error):
 #from datetime import datetime, timedelta
 
 # URL ajusta según tu endpoint real (revisa punto 2)
-KOBOLD_URL = os.environ.get("KOBOLD_URL", "http://192.168.100.17:5001/api/v1/generate")
+#KOBOLD_URL = os.environ.get("KOBOLD_URL", "http://192.168.100.17:5001/api/v1/generate")
+KOBOLD_URL = os.environ.get("KOBOLD_URL", "http://192.168.100.17:5001/v1/completions")
 _last_reset = datetime.utcnow()
 
 async def query_kobold(prompt: str) -> str:
@@ -1503,6 +1504,7 @@ async def query_kobold(prompt: str) -> str:
             async with async_timeout.timeout(30):
                 async with aiohttp.ClientSession() as sess:
                     payload = {
+                        "model": "gemma3"
                         "prompt": prompt,
                         "max_length": 256,
                         "temperature": 0.7,

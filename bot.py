@@ -62,7 +62,8 @@ OWNER_ID = 1336609089656197171         # Tu Discord ID (único autorizado para c
 PUBLIC_CHANNEL_ID  = 1338126297666424874
 SPECIAL_HELP_CHANNEL = 1338747286901100554
 GUILD_ID = 1337387112403697694
-GENERAL_CHANNEL_ID = 1337387113444020257
+GENERAL_CHANNEL_ID = 1337708244327596123
+#1337387113444020257
 
 API_SECRET = os.environ.get("API_SECRET")  # Para la API privada (opcional)
 
@@ -1407,31 +1408,26 @@ async def on_message(message):
                     except Exception as e:
                         print(f"Error forwarding DM from {message.author.id}: {e}")
                     await asyncio.sleep(1)
-        # ——— MENCIONES A @BOT ———
-    # Solo en el canal GENERAL_CHANNEL_ID, ignorar DMs y otros canales
+            # ——— MENCIONES A @BOT ———
+    # ——— MENCIONES A @BOT ———
     if message.guild and message.channel.id == GENERAL_CHANNEL_ID:
         if bot.user in message.mentions:
-            # Recupera los últimos 6 mensajes (incluyendo el actual)
+            # Recolecta los últimos 6 mensajes
             history = [msg async for msg in message.channel.history(limit=6, oldest_first=False)]
-            # Construye el contexto incluyendo los nombres, con una cabecera que indique que es solo para contexto
-            context = "Contexto:\n"
+            # Construye el prompt para KoboldAI
+            prompt = ""
             for msg in reversed(history):
+                author = msg.author.display_name
                 content = msg.content.replace(f"<@{bot.user.id}>", "").strip()
-                if content:  # evitar líneas vacías
-                    context += f"{msg.author.display_name}: {content}\n"
-            # Agrega una instrucción que separe el contexto de la respuesta
-            # La instrucción deja claro que la sección anterior es solo para contexto y no se debe continuar con diálogo
-            prompt = (
-                context +
-                "\nInstrucción: Usa el contexto anterior (con nombres informativos) únicamente para entender quién dijo qué. "
-                "No inventes ni continúes la conversación; responde solo a la última pregunta de forma concisa (menos de 2560 caracteres).\n\nRespuesta:"
-            )
+                prompt += f"{author}: {content}\n"
+            prompt += f"{bot.user.display_name}:"
+            # Envía a Kobold y responde
             response = await query_kobold(prompt)
             if response:
                 await message.channel.send(response)
             return
-
     # ————————————————
+
 
     await bot.process_commands(message)
     if message.content.startswith(PREFIX):

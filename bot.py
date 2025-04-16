@@ -1472,25 +1472,29 @@ async def on_command_error(ctx, error):
     else:
         raise error
 
-#import aiohttp, async_timeout
+#import aiohttp
+#import async_timeout
 #from datetime import datetime, timedelta
 
-# URL ajusta según tu endpoint real (revisa punto 2)
-#KOBOLD_URL = os.environ.get("KOBOLD_URL", "http://192.168.100.17:5001/api/v1/generate")
-KOBOLD_URL = os.environ.get("KOBOLD_URL", "http://192.168.100.17:5001/v1/completions")
+# Endpoint OpenAI‑compatible que sí existe en tu KoboldCpp
+KOBOLD_URL = os.environ.get(
+    "KOBOLD_URL",
+    "http://192.168.100.17:5001/v1/completions"
+)
 _last_reset = datetime.utcnow()
 
 async def query_kobold(prompt: str) -> str:
     """
-    Envía el prompt a KoboldAI Lite, reintenta al reconectar,
-    resetea la sesión cada 30 minutos y devuelve solo el texto de la IA.
+    Envía el prompt a KoboldCpp vía OpenAI‑compatible API (/v1/completions),
+    reintenta al reconectar, resetea la sesión cada 30 minutos,
+    y devuelve solo el texto de la IA.
     """
     global _last_reset
 
     # 1) Reset de sesión cada 30 min
     if datetime.utcnow() - _last_reset > timedelta(minutes=30):
         try:
-            reset_url = KOBOLD_URL.replace("/generate", "/reset")
+            reset_url = KOBOLD_URL.replace("/completions", "/reset")
             async with aiohttp.ClientSession() as sess:
                 await sess.post(reset_url)
             _last_reset = datetime.utcnow()
@@ -1504,21 +1508,22 @@ async def query_kobold(prompt: str) -> str:
             async with async_timeout.timeout(30):
                 async with aiohttp.ClientSession() as sess:
                     payload = {
-                        "model": "gemma3"
-                        "prompt": prompt,
-                        "max_length": 256,
+                        "model": "gemma3",         # tu modelo GGUF
+                        "prompt": prompt,          # <— aquí debe haber coma
+                        "max_tokens": 256,
                         "temperature": 0.7,
-                        "stop_sequences": ["\nHuman:", "\nSystem:"]
+                        "stop": ["\nHuman:", "\nSystem:"]
                     }
                     async with sess.post(KOBOLD_URL, json=payload) as resp:
                         data = await resp.json()
-                        return data["generations"][0]["text"].strip()
+                        return data["choices"][0]["text"].strip()
         except Exception as e:
             print(f"[query_kobold] intento {attempt+1} falló: {e}")
             await asyncio.sleep(5)
 
     # 3) Si todo falla
     return "Lo siento, no pude conectarme al servicio de IA en este momento."
+
 
 
 

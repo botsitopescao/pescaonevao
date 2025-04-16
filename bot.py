@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo
 import urllib.parse  # para parsear la URL de la base de datos
 from PIL import Image, ImageDraw, ImageFont  # Requiere instalar Pillow (pip install Pillow)
 import aiohttp  # Se utiliza para obtener el config.json desde la URL
+import aiohttp, async_timeout
 
 @contextmanager
 def get_db_connection():
@@ -1469,6 +1470,35 @@ async def on_command_error(ctx, error):
         await ctx.send(f"⏳ Este comando está en cooldown. Por favor, inténtalo de nuevo en {round(error.retry_after, 1)} segundos.")
     else:
         raise error
+
+#import aiohttp, async_timeout
+
+KOBOLD_URL = os.environ.get("KOBOLD_URL", "http://<IP_DE_TU_PC>:5001/api/v1/generate")
+
+async def query_kobold(prompt: str) -> str:
+    """
+    Envía el prompt a KoboldAI Lite, reintenta al reconectar,
+    y devuelve solo el texto de la IA.
+    """
+    for attempt in range(3):
+        try:
+            async with async_timeout.timeout(30):
+                async with aiohttp.ClientSession() as sess:
+                    payload = {
+                        "prompt": prompt,
+                        "max_length": 256,
+                        "temperature": 0.7,
+                        "stop_sequences": ["\nHuman:", "\nSystem:"]
+                    }
+                    async with sess.post(KOBOLD_URL, json=payload) as resp:
+                        data = await resp.json()
+                        # Asume que la respuesta está en data["generations"][0]["text"]
+                        return data["generations"][0]["text"].strip()
+        except Exception as e:
+            print(f"[query_kobold] intento {attempt+1} falló: {e}")
+            await asyncio.sleep(5)
+    return "Lo siento, no pude conectarme al servicio de IA en este momento."
+
 
 ######################################
 # EVENTO ON_READY

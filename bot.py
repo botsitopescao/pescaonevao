@@ -1410,26 +1410,26 @@ async def on_message(message):
         # ——— MENCIONES A @BOT ———
     # Solo en el canal GENERAL_CHANNEL_ID, ignorar DMs y otros canales
     if message.guild and message.channel.id == GENERAL_CHANNEL_ID:
-    if bot.user in message.mentions:
-        # Recupera los últimos 6 mensajes (incluyendo el actual)
-        history = [msg async for msg in message.channel.history(limit=6, oldest_first=False)]
-        # Construye el contexto incluyendo los nombres, con una cabecera que indique que es solo para contexto
-        context = "Contexto:\n"
-        for msg in reversed(history):
-            content = msg.content.replace(f"<@{bot.user.id}>", "").strip()
-            if content:  # evitar líneas vacías
-                context += f"{msg.author.display_name}: {content}\n"
-        # Agrega una instrucción que separe el contexto de la respuesta
-        # La instrucción deja claro que la sección anterior es solo para contexto y no se debe continuar con diálogo
-        prompt = (
-            context +
-            "\nInstrucción: Usa el contexto anterior (con nombres informativos) únicamente para entender quién dijo qué. "
-            "No inventes ni continúes la conversación; responde solo a la última pregunta de forma concisa (menos de 2560 caracteres).\n\nRespuesta:"
-        )
-        response = await query_kobold(prompt)
-        if response:
-            await message.channel.send(response)
-        return
+        if bot.user in message.mentions:
+            # Recupera los últimos 6 mensajes (incluyendo el actual)
+            history = [msg async for msg in message.channel.history(limit=6, oldest_first=False)]
+            # Construye el contexto incluyendo los nombres, con una cabecera que indique que es solo para contexto
+            context = "Contexto:\n"
+            for msg in reversed(history):
+                content = msg.content.replace(f"<@{bot.user.id}>", "").strip()
+                if content:  # evitar líneas vacías
+                    context += f"{msg.author.display_name}: {content}\n"
+            # Agrega una instrucción que separe el contexto de la respuesta
+            # La instrucción deja claro que la sección anterior es solo para contexto y no se debe continuar con diálogo
+            prompt = (
+                context +
+                "\nInstrucción: Usa el contexto anterior (con nombres informativos) únicamente para entender quién dijo qué. "
+                "No inventes ni continúes la conversación; responde solo a la última pregunta de forma concisa (menos de 2560 caracteres).\n\nRespuesta:"
+            )
+            response = await query_kobold(prompt)
+            if response:
+                await message.channel.send(response)
+            return
 
     # ————————————————
 

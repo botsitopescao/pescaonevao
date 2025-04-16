@@ -1432,12 +1432,11 @@ async def on_message(message):
                 dialog += f"{author}: {content}\n"
             # 3) Prepara el prompt final
             user_prompt = dialog + "Pescao Nevao:"
-
             # 4) Llama a Kobold con System Prompt + diálogo + stop "\n\n"
             response = await query_kobold(user_prompt)
             if response:
                 # Limpia espacios finales y envía
-                await message.channel.send(response.strip())
+                await message.channel.send(response)
             return
     # ————————————————
 
@@ -1529,7 +1528,7 @@ async def query_kobold(prompt: str) -> str:
                         "prompt": SYSTEM_PROMPT.strip() + "\n\n" + prompt,
                         "max_tokens": 256,
                         "temperature": 0.7,
-                        "stop": ["\n\n"]
+                        "stop": ["\nPescao Nevao:"]
                     }
                     async with sess.post(KOBOLD_URL, json=payload) as resp:
                         data = await resp.json()

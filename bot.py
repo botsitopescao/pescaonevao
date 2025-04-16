@@ -1557,7 +1557,7 @@ async def event_notifier():
     await bot.wait_until_ready()
     tz_peru = ZoneInfo("America/Lima")
     while not bot.is_closed():
-        now = datetime.datetime.now(tz_peru)
+        now = datetime.now(tz_peru)
         with get_conn().cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
             cur.execute("SELECT id, name, event_datetime, target_stage, target_group, notified_10h, notified_2h, notified_10m, notified_2m FROM calendar_events")
             events = cur.fetchall()

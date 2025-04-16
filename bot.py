@@ -1413,7 +1413,7 @@ async def on_message(message):
         # Comprueba si el bot fue mencionado
         if bot.user in message.mentions:
             # Recupera los últimos 5 mensajes + el actual
-            history = await message.channel.history(limit=6, oldest_first=False).flatten()
+            history = [msg async for msg in message.channel.history(limit=6, oldest_first=False)]
             # Construye el prompt para KoboldAI
             prompt = ""
             for msg in reversed(history):

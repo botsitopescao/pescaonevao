@@ -1528,7 +1528,7 @@ async def query_kobold(prompt: str) -> str:
                         "prompt": SYSTEM_PROMPT.strip() + "\n\n" + prompt,
                         "max_tokens": 256,
                         "temperature": 0.7,
-                        "stop": ["\nPescao Nevao:"]
+                        "stop": ["\n"]
                     }
                     async with sess.post(KOBOLD_URL, json=payload) as resp:
                         data = await resp.json()

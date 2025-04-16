@@ -8,3 +8,4 @@ datetime
 Pillow
 waitress
 aiohttp
+async-timeout

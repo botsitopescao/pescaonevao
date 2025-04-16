@@ -62,8 +62,7 @@ OWNER_ID = 1336609089656197171         # Tu Discord ID (único autorizado para c
 PUBLIC_CHANNEL_ID  = 1338126297666424874
 SPECIAL_HELP_CHANNEL = 1338747286901100554
 GUILD_ID = 1337387112403697694
-GENERAL_CHANNEL_ID = 1337708244327596123
-#1337387113444020257
+GENERAL_CHANNEL_ID = 1337387113444020257
 
 API_SECRET = os.environ.get("API_SECRET")  # Para la API privada (opcional)
 
@@ -709,7 +708,7 @@ async def lista_registrados(ctx):
             f"Discord: {participant['discord_name']} (ID: {user_id}) | Fortnite: {participant['fortnite_username']} | "
             f"Plataforma: {participant['platform']} | País: {participant['country']} | Puntos: {participant['puntuacion']} | "
             f"Etapa: {participant['etapa']} | Grupo: {participant.get('grupo', 'N/A')}"
-        )
+             )
         lines.append(line)
     full_message = "\n".join(lines)
     
@@ -1408,11 +1407,12 @@ async def on_message(message):
                     except Exception as e:
                         print(f"Error forwarding DM from {message.author.id}: {e}")
                     await asyncio.sleep(1)
-            # ——— MENCIONES A @BOT ———
-    # ——— MENCIONES A @BOT ———
+        # ——— MENCIONES A @BOT ———
+    # Solo en el canal GENERAL_CHANNEL_ID, ignorar DMs y otros canales
     if message.guild and message.channel.id == GENERAL_CHANNEL_ID:
+        # Comprueba si el bot fue mencionado
         if bot.user in message.mentions:
-            # Recolecta los últimos 6 mensajes
+            # Recupera los últimos 5 mensajes + el actual
             history = [msg async for msg in message.channel.history(limit=6, oldest_first=False)]
             # Construye el prompt para KoboldAI
             prompt = ""
@@ -1421,13 +1421,12 @@ async def on_message(message):
                 content = msg.content.replace(f"<@{bot.user.id}>", "").strip()
                 prompt += f"{author}: {content}\n"
             prompt += f"{bot.user.display_name}:"
-            # Envía a Kobold y responde
+            # Envía a KoboldAI y reintenta si se pierde la conexión
             response = await query_kobold(prompt)
             if response:
                 await message.channel.send(response)
             return
     # ————————————————
-
 
     await bot.process_commands(message)
     if message.content.startswith(PREFIX):

@@ -19,6 +19,7 @@ import urllib.parse  # para parsear la URL de la base de datos
 from PIL import Image, ImageDraw, ImageFont  # Requiere instalar Pillow (pip install Pillow)
 import aiohttp  # Se utiliza para obtener el config.json desde la URL
 import aiohttp, async_timeout
+from datetime import datetime, timedelta
 
 @contextmanager
 def get_db_connection():
@@ -1472,14 +1473,31 @@ async def on_command_error(ctx, error):
         raise error
 
 #import aiohttp, async_timeout
+#from datetime import datetime, timedelta
 
+# URL ajusta según tu endpoint real (revisa punto 2)
 KOBOLD_URL = os.environ.get("KOBOLD_URL", "http://192.168.100.17:5001/api/v1/generate")
+_last_reset = datetime.utcnow()
 
 async def query_kobold(prompt: str) -> str:
     """
     Envía el prompt a KoboldAI Lite, reintenta al reconectar,
-    y devuelve solo el texto de la IA.
+    resetea la sesión cada 30 minutos y devuelve solo el texto de la IA.
     """
+    global _last_reset
+
+    # 1) Reset de sesión cada 30 min
+    if datetime.utcnow() - _last_reset > timedelta(minutes=30):
+        try:
+            reset_url = KOBOLD_URL.replace("/generate", "/reset")
+            async with aiohttp.ClientSession() as sess:
+                await sess.post(reset_url)
+            _last_reset = datetime.utcnow()
+            print("[query_kobold] Sesión reiniciada tras 30 minutos.")
+        except Exception as e:
+            print(f"[query_kobold] fallo al resetear sesión: {e}")
+
+    # 2) Intentar hasta 3 veces generar texto
     for attempt in range(3):
         try:
             async with async_timeout.timeout(30):
@@ -1492,12 +1510,14 @@ async def query_kobold(prompt: str) -> str:
                     }
                     async with sess.post(KOBOLD_URL, json=payload) as resp:
                         data = await resp.json()
-                        # Asume que la respuesta está en data["generations"][0]["text"]
                         return data["generations"][0]["text"].strip()
         except Exception as e:
             print(f"[query_kobold] intento {attempt+1} falló: {e}")
             await asyncio.sleep(5)
+
+    # 3) Si todo falla
     return "Lo siento, no pude conectarme al servicio de IA en este momento."
+
 
 
 ######################################

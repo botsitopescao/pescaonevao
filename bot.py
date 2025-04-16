@@ -1473,7 +1473,7 @@ async def on_command_error(ctx, error):
 
 #import aiohttp, async_timeout
 
-KOBOLD_URL = os.environ.get("KOBOLD_URL", "http://<IP_DE_TU_PC>:5001/api/v1/generate")
+KOBOLD_URL = os.environ.get("KOBOLD_URL", "http://192.168.100.17:5001/api/v1/generate")
 
 async def query_kobold(prompt: str) -> str:
     """

@@ -1420,20 +1420,24 @@ async def on_message(message):
     # Solo en el canal GENERAL_CHANNEL_ID, ignorar DMs y otros canales
     if message.guild and message.channel.id == GENERAL_CHANNEL_ID:
         if bot.user in message.mentions:
-            # Recupera los últimos 5 mensajes + el actual
+            # 1) Recupera los últimos 5 mensajes + el actual
             history = [msg async for msg in message.channel.history(limit=6, oldest_first=False)]
             # Construye el prompt formateado
-            prompt = ""
+            #prompt = ""
+            # 2) Construye el diálogo crudo
+            dialog = ""
             for msg in reversed(history):
                 author = msg.author.display_name
                 content = msg.content.replace(f"<@{bot.user.id}>", "").strip()
-                prompt += f"### Instruction:\n{author}: {content}\n### Response:\n"
-            # Indica que ahora responde Pescao Nevao
-            prompt += "### Instruction:\nPescao Nevao:\n### Response:\n"
-            # Envía a KoboldAI y responde
-            response = await query_kobold(prompt)
+                dialog += f"{author}: {content}\n"
+            # 3) Prepara el prompt final
+            user_prompt = dialog + "Pescao Nevao:"
+
+            # 4) Llama a Kobold con System Prompt + diálogo + stop "\n\n"
+            response = await query_kobold(user_prompt)
             if response:
-                await message.channel.send(response)
+                # Limpia espacios finales y envía
+                await message.channel.send(response.strip())
             return
     # ————————————————
 
@@ -1522,10 +1526,10 @@ async def query_kobold(prompt: str) -> str:
                 async with aiohttp.ClientSession() as sess:
                     payload = {
                         "model": "gemma3",           # tu modelo GGUF
-                        "prompt": full_prompt,       # prompt con Sys+contexto
+                        "prompt": SYSTEM_PROMPT.strip() + "\n\n" + prompt,
                         "max_tokens": 256,
                         "temperature": 0.7,
-                        "stop": ["### Instruction:", "### Response:"]
+                        "stop": ["\n\n"]
                     }
                     async with sess.post(KOBOLD_URL, json=payload) as resp:
                         data = await resp.json()

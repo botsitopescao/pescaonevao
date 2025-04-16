@@ -1405,6 +1405,27 @@ async def on_message(message):
                     except Exception as e:
                         print(f"Error forwarding DM from {message.author.id}: {e}")
                     await asyncio.sleep(1)
+        # ——— MENCIONES A @BOT ———
+    # Solo en el canal GENERAL_CHANNEL_ID, ignorar DMs y otros canales
+    if message.guild and message.channel.id == GENERAL_CHANNEL_ID:
+        # Comprueba si el bot fue mencionado
+        if bot.user in message.mentions:
+            # Recupera los últimos 5 mensajes + el actual
+            history = await message.channel.history(limit=6, oldest_first=False).flatten()
+            # Construye el prompt para KoboldAI
+            prompt = ""
+            for msg in reversed(history):
+                author = msg.author.display_name
+                content = msg.content.replace(f"<@{bot.user.id}>", "").strip()
+                prompt += f"{author}: {content}\n"
+            prompt += f"{bot.user.display_name}:"
+            # Envía a KoboldAI y reintenta si se pierde la conexión
+            response = await query_kobold(prompt)
+            if response:
+                await message.channel.send(response)
+            return
+    # ————————————————
+
     await bot.process_commands(message)
     if message.content.startswith(PREFIX):
         return

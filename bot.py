@@ -882,16 +882,20 @@ async def avanzar_etapa(ctx, etapa: int):
             participant["etapa"] = etapa
             upsert_participant(user_id, participant)
             await asyncio.sleep(1)
-        if etapa in [1, 2, 3, 4, 5]:
+        if etapa in [1, 2, 3, 4, 5, 6]:
+            # Grupos para 6 etapas jugables:
+            # 1→4 grupos, 2→4, 3→3, 4→2, 5→2, 6→1
             if etapa == 1:
                 num_groups = 4
             elif etapa == 2:
                 num_groups = 4
             elif etapa == 3:
-                num_groups = 4
+                num_groups = 3
             elif etapa == 4:
                 num_groups = 2
             elif etapa == 5:
+                num_groups = 2
+            elif etapa == 6:
                 num_groups = 1
             else:
                 num_groups = 1
@@ -976,16 +980,18 @@ async def avanzar_etapa(ctx, etapa: int):
                     upsert_participant(member_id, member)
                 await asyncio.sleep(1)
         # Asignación de grupos a nivel de equipos (se conserva la misma lógica que en solo, pero por equipos)
-        if etapa in [1, 2, 3, 4, 5]:
+        if etapa in [1, 2, 3, 4, 5, 6]:
             if etapa == 1:
                 num_groups = 4
             elif etapa == 2:
                 num_groups = 4
             elif etapa == 3:
-                num_groups = 4
+                num_groups = 3
             elif etapa == 4:
                 num_groups = 2
             elif etapa == 5:
+                num_groups = 2
+            elif etapa == 6:
                 num_groups = 1
             else:
                 num_groups = 1

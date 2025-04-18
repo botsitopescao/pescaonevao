@@ -207,18 +207,20 @@ dm_forwarding = {}  # Diccionario: user_id (str) -> None o datetime
 # CONFIGURACIÓN INICIAL DEL TORNEO
 ######################################
 PREFIX = '!'
-STAGES = {1: 60, 2: 48, 3: 32, 4: 24, 5: 14, 6: 1, 7: 1, 8: 1}
+STAGES = {1: 28, 2: 28, 3: 21, 4: 16, 5: 14, 6: 7, 7: 1, 8: 1, 9: 1}
 current_stage = 1
 stage_names = {
     1: "Battle Royale",
-    2: "Snipers vs Runners",
-    3: "Boxfight duos",
-    4: "Pescadito dice",
-    5: "Gran Final",
-    6: "CAMPEÓN",
-    7: "FALTA ESCOGER OBJETOS",
-    8: "FIN"
+    2: "Boxfight",
+    3: "Pescadito dice",
+    4: "Recarga",
+    5: "Semifinal",
+    6: "FINAL",
+    7: "CAMPEÓN",
+    8: "FALTA ESCOGER OBJETOS",
+    9: "FIN"
 }
+
 
 champion_id = None
 forwarding_enabled = False
@@ -782,14 +784,14 @@ async def asignadomanual(ctx, user_id: str, stage: int, group: int):
     user = bot.get_user(int(user_id))
     if user is not None:
         try:
-            if stage == 6:
-                msg = "🏆 ¡Felicidades! Eres el campeón del torneo y acabas de ganar 2800 paVos que se te entregarán en forma de regalos de la tienda de objetos de Fortnite, así que envíame los nombres de los objetos que quieres que te regale que sumen 2800 paVos."
-                dm_forwarding[str(user_id)] = None
-            elif stage == 7:
-                msg = "🎁 Todavía te quedan objetos por escoger para completar tu premio de 2800 paVos."
+            if stage == 7:
+                msg = "🏆 ¡Felicidades! Eres el campeón del torneo y acabas de ganar 4800 paVos que se te repartirás como gustes con tu duo y se entregarán en forma de regalos de la tienda de objetos de Fortnite, así que envíame los nombres de los objetos que quieres que te regale a ti y a tu dúo que sumen 4800 paVos."
                 dm_forwarding[str(user_id)] = None
             elif stage == 8:
-                msg = "🥇 Tus objetos han sido entregados campeón, muchas gracias por participar, has sido el mejor pescadito del torneo, nos vemos pronto."
+                msg = "🎁 Todavía te quedan objetos por escoger para completar tu premio de 4800 paVos."
+                dm_forwarding[str(user_id)] = None
+            elif stage == 9:
+                msg = "🥇 Tus objetos han sido entregados campeón, muchas gracias por participar, han sido los mejores pescaditos del torneo, nos vemos pronto."
                 dm_forwarding[str(user_id)] = datetime.datetime.utcnow() + datetime.timedelta(days=2)
             else:
                 msg = f"🎉 ¡Felicidades! Has avanzado a la etapa {stage}."
@@ -906,14 +908,14 @@ async def avanzar_etapa(ctx, etapa: int):
                 user = bot.get_user(int(user_id))
                 if user is not None:
                     try:
-                        if etapa == 6:
-                            msg = "🏆 ¡Felicidades! Eres el campeón del torneo y acabas de ganar 2800 paVos..."
-                            dm_forwarding[str(user_id)] = None
-                        elif etapa == 7:
-                            msg = "🎁 Todavía te quedan objetos por escoger para completar tu premio de 2800 paVos."
+                        if etapa == 7:
+                            msg = "🏆 ¡Felicidades! Eres el campeón del torneo y acabas de ganar 4800 paVos que se te repartirás como gustes con tu duo y se entregarán en forma de regalos de la tienda de objetos de Fortnite, así que envíame los nombres de los objetos que quieres que te regale a ti y a tu dúo que sumen 4800 paVos."
                             dm_forwarding[str(user_id)] = None
                         elif etapa == 8:
-                            msg = "🥇 Tus objetos han sido entregados campeón, muchas gracias por participar..."
+                            msg = "🎁 Todavía te quedan objetos por escoger para completar tu premio de 4800 paVos."
+                            dm_forwarding[str(user_id)] = None
+                        elif etapa == 9:
+                            msg = "🥇 Tus objetos han sido entregados campeón, muchas gracias por participar, han sido los mejores pescaditos del torneo, nos vemos pronto."
                             dm_forwarding[str(user_id)] = datetime.datetime.utcnow() + datetime.timedelta(days=2)
                         else:
                             msg = f"🎉 ¡Felicidades! Has avanzado a la etapa {etapa}."
@@ -1009,14 +1011,14 @@ async def avanzar_etapa(ctx, etapa: int):
                 user = bot.get_user(int(leader_id))
                 if user is not None:
                     try:
-                        if etapa == 6:
-                            msg = "🏆 ¡Felicidades! Eres el campeón del torneo y has ganado 2800 paVos..."
-                            dm_forwarding[str(leader_id)] = None
-                        elif etapa == 7:
-                            msg = "🎁 Todavía te quedan objetos por escoger para completar tu premio de 2800 paVos."
+                        if etapa == 7:
+                            msg = "🏆 ¡Felicidades! Eres el campeón del torneo y acabas de ganar 4800 paVos que se te repartirás como gustes con tu duo y se entregarán en forma de regalos de la tienda de objetos de Fortnite, así que envíame los nombres de los objetos que quieres que te regale a ti y a tu dúo que sumen 4800 paVos."
                             dm_forwarding[str(leader_id)] = None
                         elif etapa == 8:
-                            msg = "🥇 Tus objetos han sido entregados campeón, muchas gracias por participar..."
+                            msg = "🎁 Todavía te quedan objetos por escoger para completar tu premio de 4800 paVos."
+                            dm_forwarding[str(leader_id)] = None
+                        elif etapa == 9:
+                            msg = "🥇 Tus objetos han sido entregados campeón, muchas gracias por participar, han sido los mejores pescaditos del torneo, nos vemos pronto."
                             dm_forwarding[str(leader_id)] = datetime.datetime.utcnow() + datetime.timedelta(days=2)
                         else:
                             msg = f"🎉 ¡Felicidades! Has avanzado a la etapa {etapa}."
